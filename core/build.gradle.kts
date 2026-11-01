@@ -10,6 +10,7 @@ java {
 
 dependencies {
     api(libs.json)
+    api(libs.jspecify)
     implementation(libs.sqlite.jdbc)
 
     testImplementation(platform(libs.junit.bom))
@@ -23,4 +24,12 @@ tasks.withType<JavaCompile>().configureEach {
 
 tasks.test {
     useJUnitPlatform()
+}
+
+tasks.register<JavaExec>("devDownload") {
+    group = "verification"
+    description = "Installs yt-dlp/ffmpeg/deno into build/dev-home and downloads one video."
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass = "com.viby.core.DevDownload"
+    systemProperty("viby.home", layout.buildDirectory.dir("dev-home").get().asFile.absolutePath)
 }

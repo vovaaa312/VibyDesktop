@@ -23,7 +23,7 @@ yt-dlp (auto-updated daily), FFmpeg and Deno (JavaScript runtime required by yt-
 ## Roadmap
 
 - [x] Stage 0 — project skeleton, CI
-- [ ] Stage 1 — yt-dlp engine: binary manager, downloads to MP3 with cover and tags, cookies
+- [x] Stage 1 — yt-dlp engine: binary manager, downloads to MP3 with cover and tags, cookies
 - [ ] Stage 2 — SQLite library (same schema as Android)
 - [ ] Stage 3 — persistent download queue (pause, cancel, reorder, retry, placeholders)
 - [ ] Stage 4 — playback engine, 20-band equalizer, queue, online streaming of pending tracks
