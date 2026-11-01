@@ -40,3 +40,12 @@ compose.desktop {
         }
     }
 }
+
+tasks.register<JavaExec>("renderScreens") {
+    group = "verification"
+    description = "Renders the main screens headlessly into build/screens."
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass = "com.viby.app.RenderScreensKt"
+    args(layout.buildDirectory.dir("screens").get().asFile.absolutePath)
+    systemProperty("viby.home", layout.buildDirectory.dir("dev-home").get().asFile.absolutePath)
+}
