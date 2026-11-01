@@ -91,10 +91,7 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
                                 ContextMenuItem("Играть") { state.playPlaylist(playlist) },
                                 ContextMenuItem("Перемешать") { state.playPlaylist(playlist, shuffle = true) },
                                 ContextMenuItem("Переименовать") { dialog = PlaylistDialog.Rename(playlist) },
-                                ContextMenuItem("Удалить") {
-                                    if (state.screen == Screen.PlaylistScreen(playlist.id)) state.navigate(Screen.Home)
-                                    state.library.delete(playlist.id)
-                                },
+                                ContextMenuItem("Удалить") { dialog = PlaylistDialog.Delete(playlist) },
                             )
                         }) {
                             PlaylistItem(
@@ -115,12 +112,29 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
 
     when (val current = dialog) {
         PlaylistDialog.Create -> NameDialog("Новый плейлист", "", "Создать", { dialog = null }) { name ->
-            val playlist = state.library.create(name)
-            state.navigate(Screen.PlaylistScreen(playlist.id))
+            state.library.create(name) { state.navigate(Screen.PlaylistScreen(it)) }
         }
         is PlaylistDialog.Rename -> NameDialog("Переименовать", current.playlist.name, "Сохранить", { dialog = null }) {
+            val viewing = state.screen == Screen.PlaylistScreen(current.playlist.id)
             state.library.rename(current.playlist.id, it)
+            if (viewing) state.navigate(Screen.PlaylistScreen(it))
         }
+        is PlaylistDialog.Delete -> AlertDialog(
+            onDismissRequest = { dialog = null },
+            containerColor = VibyColors.Elevated,
+            title = { Text("Удалить «${current.playlist.name}»?") },
+            text = {
+                Text("Скачанные файлы этого плейлиста будут удалены с диска, если они не используются в других плейлистах.")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (state.screen == Screen.PlaylistScreen(current.playlist.id)) state.navigate(Screen.Home)
+                    state.library.delete(current.playlist.id)
+                    dialog = null
+                }) { Text("Удалить", color = VibyColors.Danger) }
+            },
+            dismissButton = { TextButton(onClick = { dialog = null }) { Text("Отмена") } },
+        )
         null -> Unit
     }
 }
@@ -128,6 +142,7 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
 private sealed interface PlaylistDialog {
     data object Create : PlaylistDialog
     data class Rename(val playlist: Playlist) : PlaylistDialog
+    data class Delete(val playlist: Playlist) : PlaylistDialog
 }
 
 @Composable
@@ -187,7 +202,7 @@ private fun PlaylistItem(playlist: Playlist, selected: Boolean, playing: Boolean
             .padding(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        CoverArt(playlist.id, 48.dp)
+        CoverArt(playlist.id, 48.dp, imageUrl = playlist.coverUrl)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(

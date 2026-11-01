@@ -48,6 +48,7 @@ import com.viby.app.theme.VibyColors
 import com.viby.app.ui.CoverArt
 import com.viby.app.ui.IconAction
 import com.viby.app.ui.NameDialog
+import com.viby.core.download.DownloadManager
 import com.viby.core.util.YoutubeUrlParser
 import java.awt.Toolkit
 import java.awt.datatransfer.DataFlavor
@@ -68,7 +69,7 @@ private fun classify(url: String): UrlKind? = when {
 @Composable
 fun AddScreen(state: AppState) {
     var url by remember { mutableStateOf("") }
-    var targetId by remember { mutableStateOf(state.library.playlists.firstOrNull()?.id) }
+    var targetId by remember { mutableStateOf<String?>(null) }
     var creating by remember { mutableStateOf(false) }
     val kind = classify(url.trim())
 
@@ -128,7 +129,7 @@ fun AddScreen(state: AppState) {
             Text("Куда сохранить", style = MaterialTheme.typography.titleMedium, color = VibyColors.TextPrimary)
             Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                PlaylistPicker(state, targetId) { targetId = it }
+                PlaylistPicker(state, targetId, kind) { targetId = it }
                 Text(
                     "+ Новый плейлист",
                     color = VibyColors.TextSecondary,
@@ -139,10 +140,9 @@ fun AddScreen(state: AppState) {
 
             Spacer(Modifier.height(36.dp))
             Button(
-                enabled = kind != null && kind != UrlKind.INVALID && targetId != null,
+                enabled = kind != null && kind != UrlKind.INVALID && state.engine.isReady,
                 onClick = {
-                    val error = state.downloads.enqueue(url.trim(), targetId!!)
-                    if (error != null) state.showMessage(error) else {
+                    state.downloads.enqueue(url.trim(), targetId) {
                         url = ""
                         state.showMessage("Добавлено в очередь загрузок")
                         state.navigate(Screen.Downloads)
@@ -154,16 +154,24 @@ fun AddScreen(state: AppState) {
             ) {
                 Text("Скачать", style = MaterialTheme.typography.titleMedium)
             }
+            if (!state.engine.isReady) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "Скачивание станет доступно, когда закончится подготовка yt-dlp и FFmpeg",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = VibyColors.TextMuted,
+                )
+            }
         }
     }
 
     if (creating) {
-        NameDialog("Новый плейлист", "", "Создать", { creating = false }) { targetId = state.library.create(it).id }
+        NameDialog("Новый плейлист", "", "Создать", { creating = false }) { name -> state.library.create(name) { targetId = it } }
     }
 }
 
 @Composable
-private fun PlaylistPicker(state: AppState, selectedId: String?, onSelect: (String) -> Unit) {
+private fun PlaylistPicker(state: AppState, selectedId: String?, kind: UrlKind?, onSelect: (String?) -> Unit) {
     var open by remember { mutableStateOf(false) }
     val selected = selectedId?.let(state.library::playlist)
     Box {
@@ -177,23 +185,32 @@ private fun PlaylistPicker(state: AppState, selectedId: String?, onSelect: (Stri
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (selected != null) {
-                CoverArt(selected.id, 40.dp)
+                CoverArt(selected.id, 40.dp, imageUrl = selected.coverUrl)
                 Spacer(Modifier.width(12.dp))
                 Text(selected.name, color = VibyColors.TextPrimary)
             } else {
-                Text("Выберите плейлист", color = VibyColors.TextMuted, modifier = Modifier.padding(8.dp))
+                Text(autoLabel(kind), color = VibyColors.TextPrimary, modifier = Modifier.padding(8.dp))
             }
         }
         DropdownMenu(open, { open = false }, containerColor = VibyColors.Highlight) {
+            DropdownMenuItem(
+                text = { Text(autoLabel(kind), color = VibyColors.AccentBright) },
+                onClick = { onSelect(null); open = false },
+            )
             state.library.playlists.forEach { playlist ->
                 DropdownMenuItem(
-                    leadingIcon = { CoverArt(playlist.id, 28.dp, Modifier.size(28.dp)) },
+                    leadingIcon = { CoverArt(playlist.id, 28.dp, imageUrl = playlist.coverUrl) },
                     text = { Text(playlist.name, color = VibyColors.TextPrimary) },
                     onClick = { onSelect(playlist.id); open = false },
                 )
             }
         }
     }
+}
+
+private fun autoLabel(kind: UrlKind?): String = when (kind) {
+    UrlKind.VIDEO -> "Авто: «${DownloadManager.SINGLES_PLAYLIST}»"
+    else -> "Авто: плейлист с названием из YouTube"
 }
 
 private fun clipboardText(): String? = runCatching {

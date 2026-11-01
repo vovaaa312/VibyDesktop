@@ -7,14 +7,18 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
@@ -37,6 +41,7 @@ import com.viby.app.state.Screen
 import com.viby.app.state.SidePanel
 import com.viby.app.theme.VibyColors
 import com.viby.app.theme.VibyTheme
+import com.viby.app.ui.CoverCache
 import com.viby.app.ui.IconAction
 import com.viby.app.ui.Panel
 import com.viby.app.ui.PlayerBar
@@ -47,13 +52,23 @@ import com.viby.app.ui.screens.DownloadsScreen
 import com.viby.app.ui.screens.HomeScreen
 import com.viby.app.ui.screens.PlaylistScreen
 import com.viby.app.ui.screens.SettingsScreen
+import com.viby.core.VibyEngine
+import com.viby.core.tools.Tool
 import kotlinx.coroutines.delay
 import java.awt.Dimension
 
 fun main() = application {
-    val state = remember { AppState() }
+    val state = remember {
+        AppState().also {
+            CoverCache.directory = it.dirs.root().resolve("covers")
+            it.start()
+        }
+    }
     Window(
-        onCloseRequest = ::exitApplication,
+        onCloseRequest = {
+            state.close()
+            exitApplication()
+        },
         title = "Viby",
         state = rememberWindowState(size = DpSize(1360.dp, 860.dp)),
         onKeyEvent = { event ->
@@ -71,7 +86,6 @@ fun main() = application {
     ) {
         LaunchedEffect(Unit) { window.minimumSize = Dimension(1000, 640) }
         LaunchedEffect(Unit) { state.player.runClock() }
-        LaunchedEffect(Unit) { state.downloads.runSimulation() }
         VibyTheme { App(state) }
     }
 }
@@ -85,12 +99,17 @@ fun App(state: AppState) {
                 Spacer(Modifier.width(8.dp))
                 Panel(Modifier.weight(1f).fillMaxHeight()) {
                     Box(Modifier.fillMaxSize()) {
-                        when (val screen = state.screen) {
-                            Screen.Home -> HomeScreen(state)
-                            Screen.Add -> AddScreen(state)
-                            Screen.Downloads -> DownloadsScreen(state)
-                            Screen.Settings -> SettingsScreen(state)
-                            is Screen.PlaylistScreen -> PlaylistScreen(state, screen.id)
+                        Column(Modifier.fillMaxSize()) {
+                            EngineBanner(state)
+                            Box(Modifier.weight(1f)) {
+                                when (val screen = state.screen) {
+                                    Screen.Home -> HomeScreen(state)
+                                    Screen.Add -> AddScreen(state)
+                                    Screen.Downloads -> DownloadsScreen(state)
+                                    Screen.Settings -> SettingsScreen(state)
+                                    is Screen.PlaylistScreen -> PlaylistScreen(state, screen.id)
+                                }
+                            }
                         }
                         if (state.canGoBack) {
                             Box(
@@ -110,6 +129,59 @@ fun App(state: AppState) {
             PlayerBar(state)
         }
         Toast(state, Modifier.align(Alignment.BottomCenter).padding(bottom = 100.dp))
+    }
+}
+
+/** First-launch tool installation progress, or the error with a retry button. */
+@Composable
+private fun EngineBanner(state: AppState) {
+    val status = state.engineStatus
+    if (status.state() == VibyEngine.State.READY) return
+    Column(Modifier.fillMaxWidth().background(VibyColors.Elevated).padding(horizontal = 24.dp, vertical = 12.dp)) {
+        when (status.state()) {
+            VibyEngine.State.FAILED -> Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Не удалось подготовить инструменты: ${status.error() ?: "неизвестная ошибка"}",
+                    color = VibyColors.Danger,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { state.engine.retry() }) { Text("Повторить") }
+            }
+            else -> {
+                val tool = status.tool()
+                val total = status.totalBytes()
+                val label = when (tool) {
+                    null -> "Подготовка…"
+                    Tool.YT_DLP -> "yt-dlp"
+                    Tool.FFMPEG -> "FFmpeg"
+                    Tool.DENO -> "Deno"
+                }
+                val sizes = if (tool != null && total > 0) {
+                    " — ${status.downloadedBytes() shr 20} из ${total shr 20} МБ"
+                } else ""
+                Text(
+                    "Первый запуск: скачиваю $label$sizes. Это нужно один раз, дальше всё работает офлайн.",
+                    color = VibyColors.TextPrimary,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Spacer(Modifier.height(8.dp))
+                if (tool != null && total > 0) {
+                    LinearProgressIndicator(
+                        progress = { status.downloadedBytes().toFloat() / total },
+                        color = VibyColors.Accent,
+                        trackColor = VibyColors.Highlight,
+                        modifier = Modifier.fillMaxWidth().height(4.dp),
+                    )
+                } else {
+                    LinearProgressIndicator(
+                        color = VibyColors.Accent,
+                        trackColor = VibyColors.Highlight,
+                        modifier = Modifier.fillMaxWidth().height(4.dp),
+                    )
+                }
+            }
+        }
     }
 }
 

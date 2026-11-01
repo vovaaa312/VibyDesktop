@@ -1,6 +1,6 @@
 package com.viby.app.model
 
-/** UI models. They will be mapped from core entities once the SQLite library lands. */
+/** UI models mapped from core entities by LibraryState. */
 data class Track(
     val id: String,
     val title: String,
@@ -9,6 +9,13 @@ data class Track(
     val addedAt: Long = 0,
     /** null when the file is fully downloaded, otherwise 0..100. */
     val downloadProgress: Int? = null,
+    val thumbnailUrl: String? = null,
+    val filePath: String? = null,
+    val videoId: String? = null,
+    val sourceUrl: String? = null,
+    val youtubePosition: Int? = null,
+    /** User-safe failure text when the download failed. */
+    val failed: String? = null,
 ) {
     val isDownloaded: Boolean get() = downloadProgress == null
 }
@@ -18,23 +25,10 @@ data class Playlist(
     val name: String,
     val tracks: List<Track>,
     val sourceUrl: String? = null,
+    val coverUrl: String? = null,
     val youtubeSynced: Boolean = false,
 ) {
     val durationMs: Long get() = tracks.sumOf { it.durationMs }
-}
-
-data class DownloadJob(
-    val id: Long,
-    val title: String,
-    val playlistName: String,
-    val totalTracks: Int,
-    val doneTracks: Int,
-    val currentTitle: String?,
-    val currentProgress: Int,
-    val paused: Boolean = false,
-    val failedTracks: Int = 0,
-) {
-    val isFinished: Boolean get() = doneTracks >= totalTracks
 }
 
 enum class RepeatMode { OFF, ALL, ONE }

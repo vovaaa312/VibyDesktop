@@ -41,7 +41,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.viby.app.model.Track
 import com.viby.app.state.AppState
-import com.viby.app.state.DemoData
 import com.viby.app.state.SidePanel
 import com.viby.app.theme.VibyColors
 
@@ -134,7 +133,7 @@ private fun QueueItem(track: Track, current: Boolean, past: Boolean, onClick: ()
             .padding(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        CoverArt(track.id, 44.dp)
+        CoverArt(track.id, 44.dp, imageUrl = track.thumbnailUrl)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(
@@ -179,9 +178,9 @@ private fun Lyrics(state: AppState) {
         Text(track.artist, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.7f))
         Spacer(Modifier.height(12.dp))
         Text(
-            DemoData.lyrics,
+            "Тексты песен подключим следующим этапом: сначала YouTube Music, затем субтитры видео.",
             color = Color.White,
-            fontSize = 20.sp,
+            fontSize = 18.sp,
             lineHeight = 30.sp,
             fontWeight = FontWeight.Bold,
         )

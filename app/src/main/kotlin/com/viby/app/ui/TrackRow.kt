@@ -95,7 +95,8 @@ fun TrackRow(
             }
         }
         Spacer(Modifier.width(8.dp))
-        CoverArt(track.id, 40.dp, downloadProgress = track.downloadProgress)
+        CoverArt(track.id, 40.dp, downloadProgress = track.downloadProgress,
+            imageUrl = track.thumbnailUrl, failed = track.failed != null)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(
@@ -106,7 +107,11 @@ fun TrackRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                if (track.isDownloaded) track.artist else "${track.artist} • загрузка ${track.downloadProgress}%",
+                when {
+                    track.failed != null -> "${track.artist} • ${track.failed}"
+                    track.isDownloaded -> track.artist
+                    else -> "${track.artist} • загрузка ${track.downloadProgress}%"
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = VibyColors.TextSecondary,
                 maxLines = 1,

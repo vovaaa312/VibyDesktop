@@ -47,7 +47,7 @@ fun PlayerBar(state: AppState, modifier: Modifier = Modifier) {
         // now playing
         Row(Modifier.weight(0.3f), verticalAlignment = Alignment.CenterVertically) {
             if (track != null) {
-                CoverArt(track.id, 56.dp)
+                CoverArt(track.id, 56.dp, imageUrl = track.thumbnailUrl)
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.widthIn(max = 260.dp)) {
                     Text(track.title, style = MaterialTheme.typography.bodyMedium, color = VibyColors.TextPrimary,

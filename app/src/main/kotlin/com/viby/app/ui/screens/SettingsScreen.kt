@@ -34,7 +34,9 @@ import com.viby.app.state.AppState
 import com.viby.app.theme.VibyColors
 import com.viby.core.auth.CookieSource
 import com.viby.core.settings.Settings
+import com.viby.core.tools.BinaryManager
 import com.viby.core.tools.Tool
+import kotlinx.coroutines.launch
 import java.nio.file.Path
 import javax.swing.JFileChooser
 import javax.swing.filechooser.FileNameExtensionFilter
@@ -112,15 +114,37 @@ fun SettingsScreen(state: AppState) {
             }
 
             Section("Инструменты") {
+                var refresh by remember { mutableStateOf(0) }
+                var updating by remember { mutableStateOf(false) }
                 Tool.entries.forEach { tool ->
+                    val version = remember(refresh, state.engineStatus) { state.toolVersion(tool) }
                     SettingRow(
                         when (tool) {
                             Tool.YT_DLP -> "yt-dlp"
                             Tool.FFMPEG -> "FFmpeg"
                             Tool.DENO -> "Deno (JS для YouTube)"
                         },
-                        state.tools.installedVersion(tool) ?: "не установлен",
-                    ) {}
+                        version ?: "не установлен",
+                    ) {
+                        if (tool == Tool.YT_DLP && state.engine.isReady) {
+                            OutlinedButton(enabled = !updating, onClick = {
+                                updating = true
+                                state.io {
+                                    try {
+                                        val result = state.tools.update(Tool.YT_DLP, null)
+                                        state.scope.launch {
+                                            state.showMessage(
+                                                if (result == BinaryManager.UpdateResult.UPDATED) "yt-dlp обновлён"
+                                                else "Уже установлена последняя версия"
+                                            )
+                                        }
+                                    } finally {
+                                        state.scope.launch { updating = false; refresh++ }
+                                    }
+                                }
+                            }) { Text(if (updating) "Обновляю…" else "Обновить") }
+                        }
+                    }
                 }
                 Spacer(Modifier.height(8.dp))
                 Text(

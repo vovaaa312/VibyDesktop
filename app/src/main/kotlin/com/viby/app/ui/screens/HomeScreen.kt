@@ -21,6 +21,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -53,6 +55,10 @@ private enum class HomeFilter(val label: String) { ALL("Всё"), PLAYLISTS("П�
 fun HomeScreen(state: AppState) {
     var filter by remember { mutableStateOf(HomeFilter.ALL) }
     val playlists = state.library.playlists
+    if (state.library.loaded && playlists.isEmpty()) {
+        Welcome(state)
+        return
+    }
     val accent = playlists.firstOrNull()?.let { coverColors(it.id).first } ?: VibyColors.Accent
     Column(
         Modifier
@@ -86,6 +92,30 @@ fun HomeScreen(state: AppState) {
             }
         }
         Spacer(Modifier.height(40.dp))
+    }
+}
+
+@Composable
+private fun Welcome(state: AppState) {
+    Column(
+        Modifier.fillMaxSize().padding(48.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(greeting(), style = MaterialTheme.typography.headlineMedium, color = VibyColors.TextPrimary)
+        Spacer(Modifier.height(12.dp))
+        Text(
+            "Библиотека пуста. Вставьте ссылку на видео или плейлист YouTube — треки скачаются в MP3 с обложками.",
+            style = MaterialTheme.typography.bodyLarge,
+            color = VibyColors.TextSecondary,
+        )
+        Spacer(Modifier.height(24.dp))
+        Button(
+            onClick = { state.navigate(Screen.Add) },
+            colors = ButtonDefaults.buttonColors(containerColor = VibyColors.Accent, contentColor = Color.Black),
+            shape = RoundedCornerShape(24.dp),
+            modifier = Modifier.height(48.dp),
+        ) { Text("Добавить с YouTube", style = MaterialTheme.typography.titleMedium) }
     }
 }
 
@@ -142,7 +172,7 @@ private fun Shortcut(state: AppState, playlist: Playlist, modifier: Modifier) {
             },
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        CoverArt(playlist.id, 56.dp, corner = 0.dp)
+        CoverArt(playlist.id, 56.dp, corner = 0.dp, imageUrl = playlist.coverUrl)
         Text(
             playlist.name,
             style = MaterialTheme.typography.titleSmall,
@@ -182,7 +212,7 @@ private fun QuickPicks(state: AppState, tracks: List<Track>) {
                             .padding(6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        CoverArt(track.id, 48.dp)
+                        CoverArt(track.id, 48.dp, imageUrl = track.thumbnailUrl)
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text(track.title, style = MaterialTheme.typography.bodyMedium,
@@ -215,7 +245,7 @@ private fun PlaylistCard(state: AppState, playlist: Playlist) {
             .padding(12.dp),
     ) {
         Box {
-            CoverArt(playlist.id, 172.dp, corner = 6.dp)
+            CoverArt(playlist.id, 172.dp, corner = 6.dp, imageUrl = playlist.coverUrl)
             if (hovered) {
                 Box(Modifier.align(Alignment.BottomEnd).padding(8.dp)) {
                     PlayButton(false, { state.playPlaylist(playlist) }, size = 48.dp)

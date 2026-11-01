@@ -102,7 +102,17 @@ fun PlaylistScreen(state: AppState, playlistId: String) {
                 playing = playingHere && player.isPlaying,
                 onPlay = { if (playingHere) player.togglePlay() else state.playPlaylist(playlist) },
                 onShuffle = { state.playPlaylist(playlist, shuffle = true) },
-                onSync = { state.showMessage("Синхронизация с YouTube появится на этапе 7") },
+                onSync = {
+                    val source = playlist.sourceUrl
+                    if (source == null) {
+                        state.showMessage("Этот плейлист не связан с плейлистом YouTube")
+                    } else {
+                        // re-running the job only downloads tracks that are missing locally
+                        state.downloads.enqueue(source, playlist.name) {
+                            state.showMessage("Проверяю новые треки в плейлисте YouTube")
+                        }
+                    }
+                },
                 query = query,
                 onQuery = { query = it },
                 sort = sort,
@@ -125,19 +135,25 @@ fun PlaylistScreen(state: AppState, playlistId: String) {
             ContextMenuArea(items = {
                 val targets = actionTargets(track)
                 val label = if (targets.size > 1) " (${targets.size})" else ""
-                listOf(
-                    ContextMenuItem("Играть") { state.playPlaylist(playlist.copy(tracks = visible), track) },
-                    ContextMenuItem("Играть следующим$label") { player.enqueueNext(targets) },
-                    ContextMenuItem("Добавить в очередь$label") { player.enqueue(targets) },
-                    ContextMenuItem("Переместить в плейлист…$label") { moveDialog = targets.map { it.id }.toSet() },
-                    ContextMenuItem("Радио по треку") {
-                        state.showMessage("Track radio появится вместе с синхронизацией YouTube")
-                    },
-                    ContextMenuItem("Удалить из плейлиста$label") {
-                        state.library.removeTracks(playlist.id, targets.map { it.id }.toSet())
+                buildList {
+                    add(ContextMenuItem("Играть") { state.playPlaylist(playlist.copy(tracks = visible), track) })
+                    add(ContextMenuItem("Играть следующим$label") { player.enqueueNext(targets) })
+                    add(ContextMenuItem("Добавить в очередь$label") { player.enqueue(targets) })
+                    add(ContextMenuItem("Переместить в плейлист…$label") { moveDialog = targets.map { it.id }.toSet() })
+                    if (track.videoId != null) {
+                        add(ContextMenuItem("Радио по треку") { state.downloads.radio(track) })
+                    }
+                    val retryable = targets.filter { !it.isDownloaded && it.videoId != null }
+                    if (retryable.isNotEmpty()) {
+                        add(ContextMenuItem("Повторить загрузку${if (retryable.size > 1) " (${retryable.size})" else ""}") {
+                            retryable.forEach { state.downloads.retry(it, playlist.name) }
+                        })
+                    }
+                    add(ContextMenuItem("Удалить из плейлиста$label") {
+                        state.library.removeTracks(targets.map { it.id }.toSet())
                         selection = emptySet()
-                    },
-                )
+                    })
+                }
             }) {
                 TrackRow(
                     number = index + 1,
@@ -147,10 +163,11 @@ fun PlaylistScreen(state: AppState, playlistId: String) {
                     selected = track.id in selection,
                     onClick = { select(track, it) },
                     onPlay = {
-                        if (!track.isDownloaded) {
-                            state.showMessage("Трек ещё качается — будет сыгран онлайн-поток, загрузка поднята в начало очереди")
+                        if (track.failed != null) {
+                            state.showMessage(track.failed)
+                        } else {
+                            state.playPlaylist(playlist.copy(tracks = visible), track)
                         }
-                        state.playPlaylist(playlist.copy(tracks = visible), track)
                     },
                     modifier = Modifier.padding(horizontal = 16.dp),
                 )
@@ -164,7 +181,7 @@ fun PlaylistScreen(state: AppState, playlistId: String) {
             playlists = state.library.playlists.filter { it.id != playlist.id },
             onDismiss = { moveDialog = null },
         ) { target ->
-            state.library.moveTracks(playlist.id, target.id, ids)
+            state.library.moveTracks(ids, target.id)
             selection = emptySet()
             state.showMessage("${tracksLabel(ids.size)} → «${target.name}»")
         }
@@ -181,7 +198,7 @@ private fun Header(playlist: Playlist) {
             .padding(start = 32.dp, end = 32.dp, top = 56.dp, bottom = 24.dp),
         verticalAlignment = Alignment.Bottom,
     ) {
-        CoverArt(playlist.id, 200.dp, corner = 6.dp)
+        CoverArt(playlist.id, 200.dp, corner = 6.dp, imageUrl = playlist.coverUrl)
         Spacer(Modifier.width(24.dp))
         Column {
             Text("Плейлист", style = MaterialTheme.typography.bodySmall, color = VibyColors.TextPrimary)
@@ -324,7 +341,7 @@ private fun MoveDialog(playlists: List<Playlist>, onDismiss: () -> Unit, onMove:
                             .clickable { onMove(target); onDismiss() }.padding(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        CoverArt(target.id, 40.dp)
+                        CoverArt(target.id, 40.dp, imageUrl = target.coverUrl)
                         Spacer(Modifier.width(12.dp))
                         Text(target.name, color = VibyColors.TextPrimary)
                     }

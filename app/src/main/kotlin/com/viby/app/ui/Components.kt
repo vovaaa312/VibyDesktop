@@ -1,6 +1,7 @@
 package com.viby.app.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -37,6 +39,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
@@ -45,7 +48,10 @@ import androidx.compose.ui.unit.dp
 import com.viby.app.theme.VibyColors
 import kotlin.math.absoluteValue
 
-/** Deterministic gradient placeholder until real thumbnails are loaded from the library. */
+/**
+ * Square cover: the YouTube thumbnail cropped to the center, or a deterministic gradient while
+ * it loads or when there is none. [failed] shows a warning overlay for failed downloads.
+ */
 @Composable
 fun CoverArt(
     seed: String,
@@ -53,8 +59,11 @@ fun CoverArt(
     modifier: Modifier = Modifier,
     corner: Dp = 4.dp,
     downloadProgress: Int? = null,
+    imageUrl: String? = null,
+    failed: Boolean = false,
 ) {
     val (top, bottom) = coverColors(seed)
+    val image = rememberCover(imageUrl)
     Box(
         modifier
             .size(size)
@@ -62,13 +71,21 @@ fun CoverArt(
             .background(Brush.linearGradient(listOf(top, bottom))),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            Icons.Rounded.MusicNote,
-            contentDescription = null,
-            tint = Color.White.copy(alpha = 0.55f),
-            modifier = Modifier.size(size * 0.42f),
-        )
-        if (downloadProgress != null) {
+        if (image != null) {
+            Image(image, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        } else {
+            Icon(
+                Icons.Rounded.MusicNote,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.55f),
+                modifier = Modifier.size(size * 0.42f),
+            )
+        }
+        if (failed) {
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f)))
+            Icon(Icons.Rounded.ErrorOutline, "Ошибка загрузки", tint = VibyColors.Danger,
+                modifier = Modifier.size(size * 0.5f))
+        } else if (downloadProgress != null) {
             // same idea as Android's DownloadProgressOverlayView: darkened art + ring
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f)))
             CircularProgressIndicator(

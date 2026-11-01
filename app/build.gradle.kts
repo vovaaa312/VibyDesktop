@@ -13,9 +13,17 @@ kotlin {
 dependencies {
     implementation(project(":core"))
     implementation(compose.desktop.currentOs)
-    implementation(compose.material3)
-    implementation(compose.materialIconsExtended)
+    implementation(libs.material3)
+    implementation(libs.material.icons.extended)
     implementation(libs.coroutines.swing)
+
+    testImplementation(platform(libs.junit.bom))
+    testImplementation(libs.junit.jupiter)
+    testRuntimeOnly(libs.junit.launcher)
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 compose.desktop {
@@ -43,9 +51,11 @@ compose.desktop {
 
 tasks.register<JavaExec>("renderScreens") {
     group = "verification"
-    description = "Renders the main screens headlessly into build/screens."
+    description = "Downloads a video through the real engine and renders the screens into build/screens."
     classpath = sourceSets["test"].runtimeClasspath
     mainClass = "com.viby.app.RenderScreensKt"
     args(layout.buildDirectory.dir("screens").get().asFile.absolutePath)
-    systemProperty("viby.home", layout.buildDirectory.dir("dev-home").get().asFile.absolutePath)
+    providers.gradleProperty("url").orNull?.let { args(it) }
+    // reuses the yt-dlp/ffmpeg/deno installed by :core:devDownload
+    systemProperty("viby.home", rootProject.file("core/build/dev-home").absolutePath)
 }
