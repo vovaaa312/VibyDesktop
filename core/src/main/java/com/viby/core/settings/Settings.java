@@ -56,6 +56,16 @@ public final class Settings {
         save();
     }
 
+    public synchronized JSONObject getJson(String key) {
+        JSONObject value = values.optJSONObject(key);
+        return value != null ? new JSONObject(value.toString()) : new JSONObject();
+    }
+
+    public synchronized void putJson(String key, JSONObject value) {
+        values.put(key, value);
+        save();
+    }
+
     public synchronized String getString(String key, String fallback) {
         return values.optString(key, fallback);
     }

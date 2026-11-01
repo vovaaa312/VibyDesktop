@@ -26,10 +26,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AddLink
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material.icons.rounded.VideoLibrary
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -70,6 +72,11 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
                     Icons.Rounded.Download, "Загрузки", state.screen == Screen.Downloads,
                     badge = state.downloads.activeCount.takeIf { it > 0 },
                 ) { state.navigate(Screen.Downloads) }
+                if (state.account.isConfigured) {
+                    NavItem(Icons.Rounded.VideoLibrary, "Мои плейлисты YouTube", state.screen == Screen.YoutubePlaylists) {
+                        state.navigate(Screen.YoutubePlaylists)
+                    }
+                }
             }
         }
         Panel(Modifier.fillMaxWidth().weight(1f)) {
@@ -92,7 +99,9 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
                                 ContextMenuItem("Перемешать") { state.playPlaylist(playlist, shuffle = true) },
                                 ContextMenuItem("Переименовать") { dialog = PlaylistDialog.Rename(playlist) },
                                 ContextMenuItem("Удалить") { dialog = PlaylistDialog.Delete(playlist) },
-                            )
+                            ) + if (state.account.isSignedIn) listOf(
+                                ContextMenuItem("Сохранить на YouTube") { state.account.saveToYoutube(playlist.name) },
+                            ) else emptyList()
                         }) {
                             PlaylistItem(
                                 playlist = playlist,
@@ -105,8 +114,14 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
             }
         }
         Panel(Modifier.fillMaxWidth()) {
-            NavItem(Icons.Rounded.Settings, "Настройки", state.screen == Screen.Settings,
-                modifier = Modifier.padding(vertical = 4.dp)) { state.navigate(Screen.Settings) }
+            Column(Modifier.padding(vertical = 4.dp)) {
+                NavItem(Icons.Rounded.GraphicEq, "Эквалайзер", state.screen == Screen.Equalizer) {
+                    state.navigate(Screen.Equalizer)
+                }
+                NavItem(Icons.Rounded.Settings, "Настройки", state.screen == Screen.Settings) {
+                    state.navigate(Screen.Settings)
+                }
+            }
         }
     }
 

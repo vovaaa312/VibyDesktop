@@ -24,6 +24,7 @@ import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -57,12 +58,12 @@ private enum class UrlKind(val label: String) {
     VIDEO("Видео"), PLAYLIST("Плейлист"), RADIO("Радио-микс"), INVALID("Не ссылка YouTube")
 }
 
-private fun classify(url: String): UrlKind? = when {
+private fun classify(url: String, onlyVideo: Boolean): UrlKind? = when {
     url.isBlank() -> null
+    onlyVideo && YoutubeUrlParser.videoId(url) != null -> UrlKind.VIDEO
     YoutubeUrlParser.isRadioMixUrl(url) -> UrlKind.RADIO
-    YoutubeUrlParser.playlistId(url) != null && YoutubeUrlParser.videoId(url) == null -> UrlKind.PLAYLIST
-    YoutubeUrlParser.videoId(url) != null -> UrlKind.VIDEO
     YoutubeUrlParser.playlistId(url) != null -> UrlKind.PLAYLIST
+    YoutubeUrlParser.videoId(url) != null -> UrlKind.VIDEO
     else -> UrlKind.INVALID
 }
 
@@ -71,7 +72,13 @@ fun AddScreen(state: AppState) {
     var url by remember { mutableStateOf("") }
     var targetId by remember { mutableStateOf<String?>(null) }
     var creating by remember { mutableStateOf(false) }
-    val kind = classify(url.trim())
+    var onlyVideo by remember { mutableStateOf(false) }
+    val clean = url.trim()
+    val videoId = YoutubeUrlParser.videoId(clean)
+    // watch?v=…&list=… is ambiguous: a playlist by default, one video on request
+    val hasBoth = videoId != null && YoutubeUrlParser.playlistId(clean) != null
+    val kind = classify(clean, onlyVideo && hasBoth)
+    val requestUrl = if (onlyVideo && hasBoth) "https://www.youtube.com/watch?v=$videoId" else clean
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState())
@@ -117,12 +124,19 @@ fun AddScreen(state: AppState) {
             }
             if (kind != null) {
                 Spacer(Modifier.height(10.dp))
-                Text(
-                    kind.label,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = if (kind == UrlKind.INVALID) VibyColors.Danger else VibyColors.AccentBright,
-                    modifier = Modifier.padding(start = 20.dp),
-                )
+                Row(Modifier.padding(start = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        kind.label,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (kind == UrlKind.INVALID) VibyColors.Danger else VibyColors.AccentBright,
+                    )
+                    if (hasBoth) {
+                        Spacer(Modifier.width(16.dp))
+                        Checkbox(onlyVideo, { onlyVideo = it })
+                        Text("Только это видео", style = MaterialTheme.typography.bodyMedium,
+                            color = VibyColors.TextSecondary)
+                    }
+                }
             }
 
             Spacer(Modifier.height(32.dp))
@@ -142,8 +156,9 @@ fun AddScreen(state: AppState) {
             Button(
                 enabled = kind != null && kind != UrlKind.INVALID && state.engine.isReady,
                 onClick = {
-                    state.downloads.enqueue(url.trim(), targetId) {
+                    state.downloads.enqueue(requestUrl, targetId) {
                         url = ""
+                        onlyVideo = false
                         state.showMessage("Добавлено в очередь загрузок")
                         state.navigate(Screen.Downloads)
                     }

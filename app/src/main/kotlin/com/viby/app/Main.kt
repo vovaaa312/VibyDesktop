@@ -49,9 +49,11 @@ import com.viby.app.ui.RightPanel
 import com.viby.app.ui.Sidebar
 import com.viby.app.ui.screens.AddScreen
 import com.viby.app.ui.screens.DownloadsScreen
+import com.viby.app.ui.screens.EqualizerScreen
 import com.viby.app.ui.screens.HomeScreen
 import com.viby.app.ui.screens.PlaylistScreen
 import com.viby.app.ui.screens.SettingsScreen
+import com.viby.app.ui.screens.YoutubePlaylistsScreen
 import com.viby.core.VibyEngine
 import com.viby.core.tools.Tool
 import kotlinx.coroutines.delay
@@ -107,6 +109,8 @@ fun App(state: AppState) {
                                     Screen.Add -> AddScreen(state)
                                     Screen.Downloads -> DownloadsScreen(state)
                                     Screen.Settings -> SettingsScreen(state)
+                                    Screen.Equalizer -> EqualizerScreen(state)
+                                    Screen.YoutubePlaylists -> YoutubePlaylistsScreen(state)
                                     is Screen.PlaylistScreen -> PlaylistScreen(state, screen.id)
                                 }
                             }
@@ -189,7 +193,7 @@ private fun EngineBanner(state: AppState) {
 private fun Toast(state: AppState, modifier: Modifier) {
     val message = state.message ?: return
     LaunchedEffect(message) {
-        delay(3_000)
+        delay(3_000L + message.length * 40L)
         state.consumeMessage()
     }
     Box(

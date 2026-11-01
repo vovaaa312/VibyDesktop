@@ -32,6 +32,11 @@ public final class YtDlpRequest {
         return this;
     }
 
+    public YtDlpRequest removeOption(String name) {
+        options.remove(name);
+        return this;
+    }
+
     public boolean hasOption(String name) {
         return options.containsKey(name);
     }

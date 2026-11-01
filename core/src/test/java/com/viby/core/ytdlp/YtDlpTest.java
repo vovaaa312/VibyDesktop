@@ -58,6 +58,17 @@ class YtDlpTest {
     }
 
     @Test
+    void recognizesBrowserCookieFailures() {
+        assertTrue(YtDlp.isCookieLoadError("ERROR: Could not copy Chrome cookie database. See ..."));
+        assertTrue(YtDlp.isCookieLoadError("ERROR: Failed to decrypt with DPAPI"));
+        assertFalse(YtDlp.isCookieLoadError("ERROR: [youtube] abc: Private video"));
+        assertFalse(YtDlp.isCookieLoadError(null));
+        YtDlpRequest request = new YtDlpRequest("url").addOption("--cookies-from-browser", "chrome");
+        assertEquals(List.of("url"), request.copy().removeOption("--cookies-from-browser").buildCommand());
+        assertTrue(request.hasOption("--cookies-from-browser"));
+    }
+
+    @Test
     void videoInfoFallsBackToChannelAndIgnoresBlankValues() {
         VideoInfo info = new VideoInfo(new JSONObject()
                 .put("id", "abc")

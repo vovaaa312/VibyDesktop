@@ -73,6 +73,8 @@ public final class DownloadManager {
         long activeTrackId = -1;
         @Nullable String error;
         final List<Long> trackIds = new ArrayList<>();
+        /** Pre-resolved entries (YouTube Data API); null means yt-dlp resolves the URL. */
+        @Nullable JSONObject preset;
         int processCounter;
 
         Job(long id, String url, boolean isPlaylist, @Nullable String playlistName, boolean paused) {
@@ -141,7 +143,9 @@ public final class DownloadManager {
         library.resetInterruptedDownloads();
         synchronized (lock) {
             for (PendingDownload row : pending.all()) {
-                jobs.add(new Job(row.id, row.url, row.isPlaylist, row.playlistName, row.paused));
+                Job job = new Job(row.id, row.url, row.isPlaylist, row.playlistName, row.paused);
+                job.preset = row.trackOrderJson != null ? new JSONObject(row.trackOrderJson) : null;
+                jobs.add(job);
             }
             running = true;
         }
@@ -158,8 +162,18 @@ public final class DownloadManager {
         if (processId != null) {
             processKiller.destroyProcessById(processId);
         }
-        if (worker != null) {
-            worker.interrupt();
+        Thread thread = worker;
+        if (thread != null) {
+            thread.interrupt();
+            synchronized (lock) {
+                lock.notifyAll();
+            }
+            try {
+                // the worker persists the interrupted track; wait so the database outlives it
+                thread.join(5_000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 
@@ -195,12 +209,48 @@ public final class DownloadManager {
         return id;
     }
 
-    /** Playlist-only URLs and Mixes are playlists; watch URLs with a list download one video. */
+    /**
+     * Any URL with a {@code list} parameter is a playlist: browsers show
+     * {@code watch?v=…&list=…} while a playlist is playing. The UI strips the list for
+     * "only this video".
+     */
     static boolean isPlaylistUrl(String url) {
-        if (YoutubeUrlParser.isRadioMixUrl(url)) {
-            return true;
+        return YoutubeUrlParser.playlistId(url) != null;
+    }
+
+    /** One video of a pre-resolved list; {@code durationMs} 0 when unknown. */
+    public record VideoEntry(String videoId, String title, @Nullable String uploader, long durationMs) {
+    }
+
+    /**
+     * Queues videos already listed through the YouTube Data API, e.g. a private playlist of the
+     * signed-in account that yt-dlp cannot open without browser cookies.
+     */
+    public long enqueueVideos(String sourceUrl, String playlistName, String title, List<VideoEntry> videos)
+            throws SQLException {
+        JSONArray entries = new JSONArray();
+        for (VideoEntry video : videos) {
+            entries.put(new JSONObject().put("id", video.videoId()).put("title", video.title())
+                    .put("channel", video.uploader()).put("duration", video.durationMs() / 1000.0));
         }
-        return YoutubeUrlParser.playlistId(url) != null && YoutubeUrlParser.videoId(url) == null;
+        JSONObject preset = new JSONObject().put("_type", "playlist").put("title", title).put("entries", entries);
+        PendingDownload row = new PendingDownload();
+        row.url = sourceUrl;
+        row.playlistName = playlistName;
+        row.isPlaylist = true;
+        row.createdAt = System.currentTimeMillis();
+        row.queuePosition = row.createdAt;
+        row.trackOrderJson = preset.toString();
+        long id = pending.insert(row);
+        library.ensurePlaylist(playlistName);
+        Job job = new Job(id, sourceUrl, true, playlistName, false);
+        job.preset = preset;
+        synchronized (lock) {
+            jobs.add(job);
+            lock.notifyAll();
+        }
+        publish(true);
+        return id;
     }
 
     public void pause(long id) {
@@ -342,15 +392,27 @@ public final class DownloadManager {
         publish(true);
         List<Entry> entries = new ArrayList<>();
         if (job.isPlaylist) {
-            String processId = nextProcessId(job);
-            activeProcessId = processId;
-            String out = extractor.getPlaylistInfo(
-                    extractor.playlistInfoRequest(job.url, YoutubeUrlParser.isRadioMixUrl(job.url)),
-                    processId).out();
-            checkInterrupted(job);
-            JSONObject root = new JSONObject(out);
+            JSONObject root;
+            if (job.preset != null) {
+                root = job.preset;
+            } else {
+                String processId = nextProcessId(job);
+                activeProcessId = processId;
+                String out = extractor.getPlaylistInfo(
+                        extractor.playlistInfoRequest(job.url, YoutubeUrlParser.isRadioMixUrl(job.url)),
+                        processId).out();
+                checkInterrupted(job);
+                root = new JSONObject(out);
+            }
             job.title = root.optString("title", "Playlist");
             JSONArray items = root.optJSONArray("entries");
+            if (!"playlist".equals(root.optString("_type"))) {
+                // yt-dlp falls back to the single video when YouTube offers no playlist/Mix
+                if (YoutubeUrlParser.isRadioMixUrl(job.url)) {
+                    throw new IllegalStateException("YouTube не собрал микс для этого трека");
+                }
+                items = new JSONArray().put(root);
+            }
             if (items != null) {
                 for (int i = 0; i < items.length(); i++) {
                     Entry entry = entry(items.optJSONObject(i), i);

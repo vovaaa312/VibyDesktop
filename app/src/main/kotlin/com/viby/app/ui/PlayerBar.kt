@@ -15,6 +15,7 @@ import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.automirrored.rounded.VolumeDown
 import androidx.compose.material.icons.automirrored.rounded.VolumeOff
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Lyrics
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
@@ -32,6 +33,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.viby.app.model.RepeatMode
 import com.viby.app.state.AppState
+import com.viby.app.state.Screen
 import com.viby.app.state.SidePanel
 import com.viby.app.theme.VibyColors
 import com.viby.core.util.Formats
@@ -90,6 +92,8 @@ fun PlayerBar(state: AppState, modifier: Modifier = Modifier) {
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            IconAction(Icons.Rounded.GraphicEq, "Эквалайзер", { state.navigate(Screen.Equalizer) },
+                active = state.engine.equalizer().isEnabled)
             IconAction(Icons.Rounded.Lyrics, "Текст", { state.toggleSidePanel(SidePanel.LYRICS) },
                 active = state.sidePanel == SidePanel.LYRICS)
             IconAction(Icons.AutoMirrored.Rounded.QueueMusic, "Очередь", { state.toggleSidePanel(SidePanel.QUEUE) },
@@ -103,7 +107,7 @@ fun PlayerBar(state: AppState, modifier: Modifier = Modifier) {
                 "Звук", { player.muted = !player.muted },
             )
             Box(Modifier.width(110.dp).padding(end = 8.dp)) {
-                SeekBar(if (player.muted) 0f else player.volume, onSeek = {
+                SeekBar(if (player.muted) 0f else player.volume, live = true, onSeek = {
                     player.volume = it.coerceIn(0f, 1f)
                     player.muted = false
                 })

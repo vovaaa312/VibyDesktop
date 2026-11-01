@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.viby.app.state.AppState
 import com.viby.app.theme.VibyColors
+import com.viby.app.ui.CoverArt
 import com.viby.core.auth.CookieSource
 import com.viby.core.settings.Settings
 import com.viby.core.tools.BinaryManager
@@ -76,7 +77,37 @@ fun SettingsScreen(state: AppState) {
                 }
             }
 
-            Section("Аккаунт YouTube") {
+            if (state.account.isConfigured) {
+                Section("Аккаунт Google") {
+                    val account = state.account
+                    val channel = account.channel
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        if (channel != null) {
+                            CoverArt(channel.id(), 48.dp, corner = 24.dp, imageUrl = channel.thumbnailUrl())
+                            Spacer(Modifier.width(12.dp))
+                        }
+                        Column(Modifier.weight(1f)) {
+                            Text(channel?.title() ?: "Не выполнен вход", style = MaterialTheme.typography.bodyLarge,
+                                color = VibyColors.TextPrimary)
+                            Text(
+                                "Мои плейлисты YouTube, скачивание приватных плейлистов и сохранение плейлистов на YouTube",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = VibyColors.TextSecondary,
+                            )
+                        }
+                        Spacer(Modifier.width(16.dp))
+                        if (channel != null) {
+                            OutlinedButton(enabled = !account.busy, onClick = account::signOut) { Text("Выйти") }
+                        } else {
+                            OutlinedButton(enabled = !account.busy, onClick = account::signIn) {
+                                Text(if (account.busy) "Ждём браузер…" else "Войти через Google")
+                            }
+                        }
+                    }
+                }
+            }
+
+            Section("Вход для загрузок (yt-dlp)") {
                 Text(
                     "Нужен для возрастного контента, приватных плейлистов и «Понравившихся». " +
                         "yt-dlp берёт куки прямо из браузера, где вы вошли в YouTube.",

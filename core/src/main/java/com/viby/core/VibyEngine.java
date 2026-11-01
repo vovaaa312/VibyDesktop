@@ -7,9 +7,12 @@ import com.viby.core.download.AudioDownloader;
 import com.viby.core.download.DownloadManager;
 import com.viby.core.download.YoutubeExtractor;
 import com.viby.core.playback.AudioEngine;
+import com.viby.core.playback.EqualizerController;
 import com.viby.core.platform.AppDirs;
 import com.viby.core.platform.Platform;
 import com.viby.core.settings.Settings;
+import com.viby.core.sync.GoogleOAuth;
+import com.viby.core.sync.YoutubeAccount;
 import com.viby.core.tools.BinaryManager;
 import com.viby.core.tools.Tool;
 import com.viby.core.ytdlp.VideoInfo;
@@ -53,6 +56,8 @@ public final class VibyEngine implements AutoCloseable {
     private final LibraryRepository library;
     private final DownloadManager downloads;
     private final AudioEngine audio;
+    private final EqualizerController equalizer;
+    private final YoutubeAccount account;
     private final List<Listener> listeners = new CopyOnWriteArrayList<>();
     private volatile Status status = new Status(State.INITIALIZING, null, 0, 0, null);
 
@@ -68,6 +73,9 @@ public final class VibyEngine implements AutoCloseable {
                 ytDlp::destroyProcessById, library, new PendingDownloadDao(database),
                 settings::musicDirectory, settings::audioFormat);
         this.audio = new AudioEngine(tools::ffmpeg);
+        this.equalizer = new EqualizerController(audio.equalizer(), settings);
+        this.account = new YoutubeAccount(new GoogleOAuth(GoogleOAuth.ClientConfig.bundled(),
+                dirs.root().resolve("google_account.json")), library, downloads);
     }
 
     public void addListener(Listener listener) {
@@ -141,6 +149,14 @@ public final class VibyEngine implements AutoCloseable {
 
     public DownloadManager downloads() {
         return downloads;
+    }
+
+    public YoutubeAccount account() {
+        return account;
+    }
+
+    public EqualizerController equalizer() {
+        return equalizer;
     }
 
     public AudioEngine audio() {

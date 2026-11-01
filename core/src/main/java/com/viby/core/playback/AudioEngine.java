@@ -168,6 +168,18 @@ public final class AudioEngine implements AutoCloseable {
                     current.start();
                 }
             }
+            notifyAll();
+        }
+
+        /**
+         * Blocks the decoder while paused. Writing to a stopped line does not block on every
+         * mixer (Windows returns immediately), so pausing must hold the loop explicitly or the
+         * decoder runs to the end of the file and reports the track as finished.
+         */
+        private synchronized void awaitResume() throws InterruptedException {
+            while (paused && !stopped) {
+                wait();
+            }
         }
 
         long positionMs() {
@@ -176,7 +188,10 @@ public final class AudioEngine implements AutoCloseable {
         }
 
         void stop() {
-            stopped = true;
+            synchronized (this) {
+                stopped = true;
+                notifyAll();
+            }
             Process current = process;
             if (current != null) {
                 current.destroyForcibly();
@@ -240,12 +255,18 @@ public final class AudioEngine implements AutoCloseable {
                         bytes[2 * i] = (byte) pcmValue;
                         bytes[2 * i + 1] = (byte) (pcmValue >> 8);
                     }
-                    output.write(bytes, 0, usable);
+                    int offset = 0;
+                    while (offset < usable && !stopped) {
+                        awaitResume();
+                        offset += output.write(bytes, offset, usable - offset);
+                    }
                     framesWritten += usable / FRAME_BYTES;
                     // keep a partial frame for the next read
                     System.arraycopy(bytes, usable, bytes, 0, filled - usable);
                     filled -= usable;
                 }
+                // a pause right at the end must not let drain() return early and finish the track
+                awaitResume();
                 if (!stopped) {
                     output.drain();
                 }

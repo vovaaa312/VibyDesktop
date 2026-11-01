@@ -149,12 +149,17 @@ fun PlayButton(
 ) {
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
-    val scale = if (hovered) 1.06f else 1f
     Box(
         Modifier
-            .size(size * scale)
+            .size(size)
             .clip(CircleShape)
-            .background(if (hovered && background == VibyColors.Accent) VibyColors.AccentBright else background)
+            .background(
+                when {
+                    !hovered -> background
+                    background == VibyColors.Accent -> VibyColors.AccentBright
+                    else -> background.copy(alpha = 0.85f)
+                }
+            )
             .hoverable(interaction)
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
             .pointerHoverIcon(PointerIcon.Hand),
@@ -178,6 +183,8 @@ fun PlayButton(
 fun SeekBar(
     fraction: Float,
     onSeek: (Float) -> Unit,
+    /** Report every drag step (volume) instead of only the release (track seeking). */
+    live: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val interaction = remember { MutableInteractionSource() }
@@ -196,10 +203,17 @@ fun SeekBar(
             }
             .pointerInput(Unit) {
                 detectDragGestures(
-                    onDragStart = { dragFraction = it.x / size.width },
+                    onDragStart = {
+                        dragFraction = it.x / size.width
+                        if (live) onSeek(it.x / size.width)
+                    },
                     onDragEnd = { dragFraction?.let(onSeek); dragFraction = null },
                     onDragCancel = { dragFraction = null },
-                ) { change, _ -> dragFraction = (change.position.x / size.width).coerceIn(0f, 1f) }
+                ) { change, _ ->
+                    val fraction = (change.position.x / size.width).coerceIn(0f, 1f)
+                    dragFraction = fraction
+                    if (live) onSeek(fraction)
+                }
             },
     ) {
         val barHeight = 4.dp.toPx()

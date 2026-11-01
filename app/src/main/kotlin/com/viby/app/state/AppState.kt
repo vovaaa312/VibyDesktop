@@ -29,6 +29,8 @@ sealed interface Screen {
     data object Add : Screen
     data object Downloads : Screen
     data object Settings : Screen
+    data object Equalizer : Screen
+    data object YoutubePlaylists : Screen
     data class PlaylistScreen(val id: String) : Screen
 }
 
@@ -46,6 +48,7 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
     val library = LibraryState(this)
     val player = PlayerState(EngineAudio(engine.audio()))
     val downloads = DownloadsState(this)
+    val account = AccountState(this)
 
     var engineStatus by mutableStateOf(engine.status())
         private set
@@ -65,6 +68,17 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
         engine.downloads().addListener { jobs -> scope.launch { downloads.publish(jobs) } }
         library.requestReload()
         player.loader = ::loadTrack
+        engine.ytDlp().setCookieFailureListener {
+            scope.launch {
+                if (!cookieWarningShown) {
+                    cookieWarningShown = true
+                    showMessage(
+                        "Не удалось прочитать куки из браузера — качаю без входа. " +
+                            "Закройте браузер или выберите Firefox / cookies.txt в настройках"
+                    )
+                }
+            }
+        }
         engine.audio().setListener(object : AudioEngine.Listener {
             override fun onEnded() {
                 scope.launch { player.onEnded() }
@@ -80,6 +94,7 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
     }
 
     private var loadToken = 0
+    private var cookieWarningShown = false
 
     /** Plays the local file, or resolves an online stream for tracks that are not downloaded yet. */
     private fun loadTrack(queued: Track, startMs: Long, paused: Boolean) {

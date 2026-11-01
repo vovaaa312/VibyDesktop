@@ -46,6 +46,7 @@ class DownloadManagerTest {
     private final Set<String> killed = ConcurrentHashMap.newKeySet();
     private final Map<String, Integer> downloadCalls = new ConcurrentHashMap<>();
     private DownloadManager manager;
+    private volatile boolean playlistInfoCalled;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -65,7 +66,7 @@ class DownloadManagerTest {
     void classifiesUrls() {
         assertTrue(DownloadManager.isPlaylistUrl("https://www.youtube.com/playlist?list=PL1"));
         assertTrue(DownloadManager.isPlaylistUrl("https://www.youtube.com/watch?v=abc&list=RDabc"));
-        assertFalse(DownloadManager.isPlaylistUrl("https://www.youtube.com/watch?v=abc&list=PL1"));
+        assertTrue(DownloadManager.isPlaylistUrl("https://www.youtube.com/watch?v=abc&list=PL1"));
         assertFalse(DownloadManager.isPlaylistUrl("https://youtu.be/abc"));
         assertThrows(IllegalArgumentException.class, () -> manager.enqueue("https://example.com", null));
     }
@@ -99,6 +100,20 @@ class DownloadManagerTest {
         await(() -> finished(2));
         assertEquals(tracks.get(0).filePath, library.tracks("Other").get(0).filePath);
         assertEquals(1, downloadCalls.get("v1"));
+    }
+
+    @Test
+    void apiListedVideosSkipYtDlpResolvingAndSurviveRestart() throws Exception {
+        manager.start();
+        manager.enqueueVideos("https://www.youtube.com/playlist?list=PLprivate", "Private", "My private",
+                List.of(new DownloadManager.VideoEntry("p1", "Secret song", "Me", 125_000),
+                        new DownloadManager.VideoEntry("p2", "Another", null, 0)));
+        await(() -> finished(1));
+        List<Track> tracks = library.tracks("Private");
+        assertEquals(List.of("p1", "p2"), tracks.stream().map(t -> t.videoId).toList());
+        assertEquals(125_000, tracks.get(0).durationMs);
+        assertEquals("My private", manager.jobs().get(0).title());
+        assertFalse(playlistInfoCalled);
     }
 
     @Test
@@ -174,7 +189,8 @@ class DownloadManagerTest {
 
             @Override
             public YtDlpResponse execute(YtDlpRequest request, String processId) {
-                JSONObject root = new JSONObject().put("title", "Road Trip").put("entries", new JSONArray()
+                playlistInfoCalled = true;
+                JSONObject root = new JSONObject().put("_type", "playlist").put("title", "Road Trip").put("entries", new JSONArray()
                         .put(new JSONObject().put("id", "v1").put("title", "First").put("channel", "Artist"))
                         .put(new JSONObject().put("id", "gone").put("title", "[Deleted video]"))
                         .put(new JSONObject().put("id", "v2").put("title", "Second").put("channel", "B")));

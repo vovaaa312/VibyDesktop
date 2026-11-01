@@ -19,3 +19,6 @@ Thumbs.db
 # Local secrets (OAuth client, signing)
 local.properties
 *.env
+
+# Google OAuth client for YouTube sync
+client_secret*.json

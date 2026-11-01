@@ -31,20 +31,63 @@ public final class YtDlp {
     private static final Pattern PROGRESS = Pattern.compile(
             "\\[download]\\s+(\\d{1,3}(?:\\.\\d+)?)%.*?ETA\\s+(?:(\\d+):)?(\\d+):(\\d+)");
 
+    /** Browser cookies could not be read; the request was retried without them. */
+    public interface CookieFailureListener {
+        void onCookieFailure(String message);
+    }
+
     private final ToolPaths tools;
     private final Map<String, Process> processes = new ConcurrentHashMap<>();
     private final Set<String> canceled = ConcurrentHashMap.newKeySet();
+    private volatile @Nullable CookieFailureListener cookieFailureListener;
 
     public YtDlp(ToolPaths tools) {
         this.tools = tools;
+    }
+
+    public void setCookieFailureListener(@Nullable CookieFailureListener listener) {
+        this.cookieFailureListener = listener;
     }
 
     public YtDlpResponse execute(YtDlpRequest request) throws YtDlpException, InterruptedException {
         return execute(request, null, null);
     }
 
+    /**
+     * Runs the request. When {@code --cookies-from-browser} fails (Chrome locks and encrypts
+     * its cookie database on Windows), the request is repeated without cookies so public
+     * playlists and videos keep working.
+     */
     public YtDlpResponse execute(YtDlpRequest request, @Nullable String processId,
                                  @Nullable ProgressCallback callback)
+            throws YtDlpException, InterruptedException {
+        try {
+            return run(request, processId, callback);
+        } catch (YtDlpException e) {
+            if (e instanceof YtDlpException.Canceled || !request.hasOption("--cookies-from-browser")
+                    || !isCookieLoadError(e.getMessage())) {
+                throw e;
+            }
+            CookieFailureListener listener = cookieFailureListener;
+            if (listener != null) {
+                listener.onCookieFailure(e.getMessage());
+            }
+            return run(request.copy().removeOption("--cookies-from-browser"), processId, callback);
+        }
+    }
+
+    static boolean isCookieLoadError(@Nullable String message) {
+        if (message == null) {
+            return false;
+        }
+        String text = message.toLowerCase(java.util.Locale.ROOT);
+        return text.contains("cookie database") || text.contains("failed to decrypt")
+                || text.contains("dpapi") || text.contains("failed to load cookies")
+                || (text.contains("could not find") && text.contains("cookies"));
+    }
+
+    private YtDlpResponse run(YtDlpRequest request, @Nullable String processId,
+                              @Nullable ProgressCallback callback)
             throws YtDlpException, InterruptedException {
         YtDlpRequest effective = request.copy();
         if (callback != null) {
