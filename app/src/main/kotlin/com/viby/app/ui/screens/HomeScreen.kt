@@ -42,6 +42,7 @@ import com.viby.app.model.Track
 import com.viby.app.state.AppState
 import com.viby.app.state.Screen
 import com.viby.app.theme.VibyColors
+import com.viby.app.ui.ScrollColumn
 import com.viby.app.ui.CoverArt
 import com.viby.app.ui.PlayButton
 import com.viby.app.ui.SectionTitle
@@ -60,10 +61,9 @@ fun HomeScreen(state: AppState) {
         return
     }
     val accent = playlists.firstOrNull()?.let { coverColors(it.id).first } ?: VibyColors.Accent
-    Column(
-        Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
+    ScrollColumn(
+        Modifier.fillMaxSize(),
+        contentModifier = Modifier
             .background(Brush.verticalGradient(0f to accent.copy(alpha = 0.35f), 0.35f to Color.Transparent)),
     ) {
         Column(Modifier.padding(start = 32.dp, end = 32.dp, top = 64.dp, bottom = 24.dp)) {

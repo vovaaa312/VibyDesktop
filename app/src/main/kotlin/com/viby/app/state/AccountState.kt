@@ -6,6 +6,8 @@ import androidx.compose.runtime.setValue
 import com.viby.core.sync.YoutubePlaylistApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.awt.Desktop
 import java.net.URI
@@ -23,15 +25,26 @@ class AccountState(private val app: AppState) {
     var playlists by mutableStateOf<List<YoutubePlaylistApi.AccountPlaylist>?>(null)
         private set
 
-    val isSignedIn: Boolean get() = channel != null
+    /**
+     * Based on the stored refresh token, not on the channel request: a failed request at start-up
+     * (no network yet) must not silently turn YouTube sync off for the whole session.
+     */
+    var isSignedIn by mutableStateOf(account.isConfigured && account.isSignedIn)
+        private set
+
+    /** Serializes account work so a second action waits instead of being dropped. */
+    private val queue = Mutex()
+    private var running by mutableStateOf(0)
 
     init {
-        if (account.isConfigured) {
-            app.scope.launch {
-                channel = runCatching {
-                    withContext(Dispatchers.IO) { if (account.isSignedIn) account.channel() else null }
-                }.getOrNull()
-            }
+        if (isSignedIn) loadChannel()
+    }
+
+    private fun loadChannel() {
+        app.scope.launch {
+            runCatching { withContext(Dispatchers.IO) { account.channel() } }
+                .onSuccess { channel = it }
+                .onFailure { app.showMessage("Не удалось получить данные канала YouTube: ${it.message}") }
         }
     }
 
@@ -39,6 +52,7 @@ class AccountState(private val app: AppState) {
         val result = account.signIn { uri -> openInBrowser(uri) }
         app.scope.launch {
             channel = result
+            isSignedIn = true
             app.showMessage("Вы вошли как ${result.title()}")
         }
     }
@@ -48,6 +62,7 @@ class AccountState(private val app: AppState) {
         app.scope.launch {
             channel = null
             playlists = null
+            isSignedIn = false
         }
     }
 
@@ -66,16 +81,55 @@ class AccountState(private val app: AppState) {
         app.scope.launch { app.showMessage("«$playlistName» сохранён на YouTube как приватный плейлист") }
     }
 
+    fun enableSync(playlistName: String) = task {
+        val result = account.enableSync(playlistName)
+        app.scope.launch {
+            app.showMessage("Синхронизация с «${result.remoteTitle}» включена, связано треков: ${result.linkedTracks}")
+        }
+    }
+
+    fun disableSync(playlistName: String) = task {
+        account.disableSync(playlistName)
+        app.scope.launch { app.showMessage("Синхронизация с YouTube выключена") }
+    }
+
+    /** Sends local additions to YouTube; remote additions are pulled by re-downloading the source. */
+    /**
+     * @param videoIds videos to send; null sends tracks added locally and never seen on YouTube
+     */
+    fun pushMissing(playlistName: String, videoIds: List<String>? = null, quiet: Boolean = false) = task {
+        val result = account.pushMissing(playlistName, videoIds)
+        app.scope.launch {
+            when {
+                result == null -> if (!quiet) app.showMessage("Новых локальных треков для YouTube нет")
+                result.failedCount > 0 -> app.showMessage(
+                    "На YouTube добавлено ${result.addedCount}, ошибок: ${result.failedCount} (${result.firstError})")
+                result.addedCount > 0 -> app.showMessage("На YouTube добавлено треков: ${result.addedCount}")
+                !quiet -> app.showMessage("Плейлист на YouTube уже совпадает с локальным")
+            }
+        }
+    }
+
+    fun deleteSynced(playlistName: String, trackIds: Set<String>) = task {
+        val result = account.deleteSynced(playlistName, trackIds.map(String::toLong))
+        if (result.failedCount > 0) {
+            app.scope.launch {
+                app.showMessage("Не удалось удалить с YouTube: ${result.failedCount} (${result.firstError})")
+            }
+        }
+    }
+
     private fun task(block: () -> Unit) {
-        if (busy) return
+        running++
         busy = true
         app.scope.launch {
             try {
-                withContext(Dispatchers.IO) { block() }
+                queue.withLock { withContext(Dispatchers.IO) { block() } }
             } catch (e: Exception) {
                 app.showMessage(e.message ?: e.javaClass.simpleName)
             } finally {
-                busy = false
+                running--
+                busy = running > 0
             }
         }
     }

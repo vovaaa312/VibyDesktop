@@ -1,12 +1,17 @@
 package com.viby.app.theme
 
+import androidx.compose.foundation.LocalScrollbarStyle
+import androidx.compose.foundation.ScrollbarStyle
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /** Dark palette: Spotify-like neutral surfaces with a Viby violet accent. */
@@ -67,6 +72,17 @@ fun VibyTheme(content: @Composable () -> Unit) {
             error = VibyColors.Danger,
         ),
         typography = typography,
-        content = content,
-    )
+    ) {
+        CompositionLocalProvider(
+            LocalScrollbarStyle provides ScrollbarStyle(
+                minimalHeight = 32.dp,
+                thickness = 8.dp,
+                shape = RoundedCornerShape(4.dp),
+                hoverDurationMillis = 200,
+                unhoverColor = Color.White.copy(alpha = 0.18f),
+                hoverColor = Color.White.copy(alpha = 0.45f),
+            ),
+            content = content,
+        )
+    }
 }

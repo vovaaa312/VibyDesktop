@@ -54,6 +54,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.viby.app.state.AppState
 import com.viby.app.theme.VibyColors
+import com.viby.app.ui.ScrollColumn
 import com.viby.app.ui.NameDialog
 import com.viby.core.playback.EqPresets
 import com.viby.core.playback.Equalizer
@@ -78,9 +79,9 @@ fun EqualizerScreen(state: AppState) {
         controller.gains().forEachIndexed { band, gain -> gains[band] = gain }
     }
 
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState())
-            .padding(start = 32.dp, end = 32.dp, top = 64.dp, bottom = 32.dp),
+    ScrollColumn(
+        Modifier.fillMaxSize(),
+        contentModifier = Modifier.padding(start = 32.dp, end = 32.dp, top = 64.dp, bottom = 32.dp),
     ) {
         Column(Modifier.widthIn(max = 980.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

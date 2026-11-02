@@ -49,6 +49,7 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
     val player = PlayerState(EngineAudio(engine.audio()))
     val downloads = DownloadsState(this)
     val account = AccountState(this)
+    val updates = UpdateState(this)
 
     var engineStatus by mutableStateOf(engine.status())
         private set
@@ -199,7 +200,8 @@ class LibraryState(private val app: AppState) {
     init {
         app.scope.launch {
             for (ignored in reloads) {
-                val fresh = withContext(Dispatchers.IO) { load(app.engine.library()) }
+                // the database is closed while the app shuts down; a late reload must not crash
+                val fresh = runCatching { withContext(Dispatchers.IO) { load(app.engine.library()) } }.getOrNull() ?: continue
                 playlists = withLiveProgress(fresh, app.downloads.jobs)
                 loaded = true
                 delay(100) // coalesce bursts of library notifications
@@ -227,19 +229,22 @@ class LibraryState(private val app: AppState) {
         if (!app.engine.library().renamePlaylist(from, to)) error("Плейлист «$to» уже существует")
     }
 
-    fun removeTracks(trackIds: Set<String>) = app.io {
-        app.engine.library().removeTracks(trackIds.map(String::toLong))
+    fun removeTracks(trackIds: Set<String>, deleteFiles: Boolean = false) = app.io {
+        app.engine.library().removeTracks(trackIds.map(String::toLong), deleteFiles)
     }
 
-    fun moveTracks(trackIds: Set<String>, target: String) = app.io {
-        app.engine.library().moveTracks(trackIds.map(String::toLong), target)
+    /** "Send to playlist": copies tracks (shared files) and reports how many were added. */
+    fun copyTracks(trackIds: Set<String>, target: String, onCopied: (Int) -> Unit = {}) = app.io {
+        val added = app.engine.library().copyTracks(trackIds.map(String::toLong), target)
+        app.scope.launch { onCopied(added) }
     }
 
     fun recentTracks(limit: Int): List<Track> =
         playlists.flatMap { it.tracks }.filter { it.isDownloaded }.sortedByDescending { it.addedAt }.take(limit)
 
     fun sorted(tracks: List<Track>, mode: SortMode): List<Track> = when (mode) {
-        SortMode.YOUTUBE -> tracks.sortedWith(compareBy<Track, Int?>(nullsLast()) { it.youtubePosition })
+        // playlist order as stored: YouTube order for imported playlists, sent tracks on top
+        SortMode.YOUTUBE -> tracks
         SortMode.ADDED -> tracks.sortedByDescending { it.addedAt }
         SortMode.TITLE -> tracks.sortedBy { it.title.lowercase() }
         SortMode.ARTIST -> tracks.sortedBy { it.artist.lowercase() }
@@ -272,6 +277,8 @@ class LibraryState(private val app: AppState) {
                 tracks = repository.tracks(summary.name).map { it.toUi() },
                 sourceUrl = summary.sourceUrl,
                 coverUrl = summary.coverUrl,
+                youtubeSynced = summary.youtubeSyncEnabled,
+                youtubePlaylistId = summary.youtubePlaylistId,
             )
         }
 
@@ -317,6 +324,10 @@ class DownloadsState(private val app: AppState) {
     fun enqueue(url: String, playlistName: String?, onQueued: () -> Unit = {}) {
         if (!app.engine.isReady) {
             app.showMessage("Подождите: идёт подготовка yt-dlp и FFmpeg")
+            return
+        }
+        if (app.engine.downloads().isQueued(url, playlistName)) {
+            app.showMessage("Эта ссылка уже скачивается — смотрите «Загрузки»")
             return
         }
         app.io {

@@ -27,14 +27,17 @@ data class Playlist(
     val sourceUrl: String? = null,
     val coverUrl: String? = null,
     val youtubeSynced: Boolean = false,
+    /** Owned or imported YouTube playlist this one can sync with (radio mixes excluded). */
+    val youtubePlaylistId: String? = null,
 ) {
     val durationMs: Long get() = tracks.sumOf { it.durationMs }
+    val canSync: Boolean get() = youtubePlaylistId != null && !youtubePlaylistId.startsWith("RD")
 }
 
 enum class RepeatMode { OFF, ALL, ONE }
 
 enum class SortMode(val label: String) {
-    YOUTUBE("Порядок YouTube"),
+    YOUTUBE("Порядок плейлиста"),
     ADDED("Недавно добавленные"),
     TITLE("Название"),
     ARTIST("Исполнитель"),

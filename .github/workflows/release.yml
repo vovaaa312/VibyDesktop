@@ -1,0 +1,47 @@
+name: release
+
+# Push a tag like v1.0.0 to build installers for Windows, macOS and Linux and publish them
+# as a GitHub release. The in-app updater reads the latest release and verifies the
+# SHA-256 digest GitHub reports for each asset.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            task: packageMsi
+            files: app/build/compose/binaries/main/msi/*.msi
+          - os: macos-latest
+            task: packageDmg
+            files: app/build/compose/binaries/main/dmg/*.dmg
+          - os: ubuntu-latest
+            task: packageDeb
+            files: app/build/compose/binaries/main/deb/*.deb
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      # Desktop OAuth client for Google sign-in; builds without the secret hide sign-in
+      - name: Google OAuth client
+        shell: bash
+        env:
+          GOOGLE_OAUTH_CLIENT: ${{ secrets.GOOGLE_OAUTH_CLIENT }}
+        run: |
+          if [ -n "$GOOGLE_OAUTH_CLIENT" ]; then printf '%s' "$GOOGLE_OAUTH_CLIENT" > client_secret.json; fi
+      - run: ./gradlew test :app:${{ matrix.task }} --no-daemon
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.files }}
+          generate_release_notes: true

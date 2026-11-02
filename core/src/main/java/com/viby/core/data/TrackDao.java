@@ -121,6 +121,11 @@ public final class TrackDao {
         }
     }
 
+    /** Moves every track of the playlist down by {@code count} to make room at the top. */
+    public void shiftPositions(String playlistName, int count) throws SQLException {
+        execute("UPDATE `tracks` SET `position` = `position` + ? WHERE `playlistName` = ?", count, playlistName);
+    }
+
     public void delete(long id) throws SQLException {
         execute("DELETE FROM `tracks` WHERE `id` = ?", id);
     }

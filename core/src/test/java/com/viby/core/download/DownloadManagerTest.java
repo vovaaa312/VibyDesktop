@@ -117,6 +117,51 @@ class DownloadManagerTest {
     }
 
     @Test
+    void refreshPutsNewTracksAtTheirSourcePositions() throws Exception {
+        // a local playlist that already has the second source track and a device-only track
+        Track second = new Track();
+        second.playlistName = "Road Trip";
+        second.videoId = "v2";
+        second.title = "Second";
+        second.filePath = Files.writeString(temp.resolve("second.mp3"), "audio").toString();
+        library.insert(second);
+        Track local = new Track();
+        local.playlistName = "Road Trip";
+        local.title = "Local file";
+        local.filePath = Files.writeString(temp.resolve("local.mp3"), "audio").toString();
+        library.insert(local);
+
+        manager.start();
+        manager.enqueue("https://www.youtube.com/playlist?list=PL1", "Road Trip");
+        await(() -> finished(1));
+
+        // v1 is first in the source, so the new track goes to the top, not to the bottom
+        assertEquals(java.util.Arrays.asList("v1", "v2", null),
+                library.tracks("Road Trip").stream().map(t -> t.videoId).toList());
+        assertEquals(0, library.findInPlaylist("Road Trip", "v1").youtubePosition);
+    }
+
+    @Test
+    void sameUrlIsNotQueuedTwiceWhileUnfinished() throws Exception {
+        blockingVideos.put("v1", new CountDownLatch(1));
+        manager.start();
+        String url = "https://www.youtube.com/playlist?list=PL1";
+        long first = manager.enqueue(url, "Mix");
+        assertTrue(manager.isQueued(url, "Mix"));
+        assertEquals(first, manager.enqueue(url, "Mix"));
+        assertEquals(1, manager.jobs().size());
+        assertEquals(1, pending.all().size());
+
+        blockingVideos.clear();
+        await(() -> finished(1));
+        // once finished, the same playlist can be refreshed again
+        assertFalse(manager.isQueued(url, "Mix"));
+        long refresh = manager.enqueue(url, "Mix");
+        assertTrue(refresh != first);
+        await(() -> finished(2));
+    }
+
+    @Test
     void permanentFailureMarksTrackAndContinues() throws Exception {
         failingVideos.add("v1");
         manager.start();

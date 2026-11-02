@@ -19,6 +19,8 @@ import java.nio.file.Path;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Supplier;
@@ -170,7 +172,7 @@ public final class DownloadManager {
             }
             try {
                 // the worker persists the interrupted track; wait so the database outlives it
-                thread.join(5_000);
+                thread.join(2_000);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
@@ -191,6 +193,14 @@ public final class DownloadManager {
         }
         String target = playlistName != null && !playlistName.isBlank() ? playlistName.trim()
                 : isPlaylist ? null : SINGLES_PLAYLIST;
+        Job running = findUnfinished(clean, target);
+        if (running != null) {
+            // "refresh" while the same playlist is still downloading must not queue it twice
+            if (running.paused) {
+                resume(running.id);
+            }
+            return running.id;
+        }
         PendingDownload row = new PendingDownload();
         row.url = clean;
         row.playlistName = target;
@@ -218,6 +228,25 @@ public final class DownloadManager {
         return YoutubeUrlParser.playlistId(url) != null;
     }
 
+    /** True when {@code url} is already queued or downloading into {@code playlistName}. */
+    public boolean isQueued(String url, @Nullable String playlistName) {
+        return findUnfinished(url.trim(), playlistName) != null;
+    }
+
+    /** Same URL, and the same target playlist when one is given (null targets match any). */
+    private @Nullable Job findUnfinished(String url, @Nullable String playlistName) {
+        synchronized (lock) {
+            for (Job job : jobs) {
+                if (!isFinished(job) && !job.canceled && job.url.equals(url)
+                        && (playlistName == null || job.playlistName == null
+                        || playlistName.equals(job.playlistName))) {
+                    return job;
+                }
+            }
+            return null;
+        }
+    }
+
     /** One video of a pre-resolved list; {@code durationMs} 0 when unknown. */
     public record VideoEntry(String videoId, String title, @Nullable String uploader, long durationMs) {
     }
@@ -228,6 +257,10 @@ public final class DownloadManager {
      */
     public long enqueueVideos(String sourceUrl, String playlistName, String title, List<VideoEntry> videos)
             throws SQLException {
+        Job running = findUnfinished(sourceUrl, playlistName);
+        if (running != null) {
+            return running.id;
+        }
         JSONArray entries = new JSONArray();
         for (VideoEntry video : videos) {
             entries.put(new JSONObject().put("id", video.videoId()).put("title", video.title())
@@ -338,6 +371,7 @@ public final class DownloadManager {
             List<Entry> entries = resolve(job);
             String playlist = job.playlistName;
             List<Track> queue = preparePlaceholders(job, entries, playlist);
+            applySourceOrder(job, entries, playlist);
             job.status = Status.DOWNLOADING;
             publish(true);
             for (Track item : queue) {
@@ -355,6 +389,7 @@ public final class DownloadManager {
                     job.failed++;
                 }
             }
+            applySourceOrder(job, entries, playlist);
             job.status = job.failed > 0 ? Status.DONE_WITH_ERRORS : Status.DONE;
             job.currentTitle = null;
             job.activeTrackId = -1;
@@ -516,6 +551,18 @@ public final class DownloadManager {
             queue.add(track);
         }
         return queue;
+    }
+
+    /** Android applyYoutubeOrder: new and refreshed tracks follow the source playlist order. */
+    private void applySourceOrder(Job job, List<Entry> entries, String playlist) {
+        if (!job.isPlaylist) {
+            return;
+        }
+        Map<String, Integer> positions = new HashMap<>();
+        for (Entry entry : entries) {
+            positions.putIfAbsent(entry.videoId(), entry.position());
+        }
+        library.applySourceOrder(playlist, positions);
     }
 
     private void downloadWithRetries(Job job, Track item, String playlist) throws Exception {

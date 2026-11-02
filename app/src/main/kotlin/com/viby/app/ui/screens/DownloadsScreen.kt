@@ -36,6 +36,7 @@ import com.viby.app.state.AppState
 import com.viby.app.state.Screen
 import com.viby.app.theme.VibyColors
 import com.viby.app.ui.CoverArt
+import com.viby.app.ui.ScrollLazyColumn
 import com.viby.app.ui.EmptyHint
 import com.viby.app.ui.IconAction
 import com.viby.core.download.DownloadManager.JobSnapshot
@@ -64,7 +65,7 @@ fun DownloadsScreen(state: AppState) {
             EmptyHint("Нет загрузок", "Добавьте ссылку на видео или плейлист в разделе «Добавить с YouTube».")
             return
         }
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        ScrollLazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(jobs, key = { it.id() }) { job -> JobCard(state, job) }
         }
     }

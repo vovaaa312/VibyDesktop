@@ -75,7 +75,7 @@ public final class VibyEngine implements AutoCloseable {
         this.audio = new AudioEngine(tools::ffmpeg);
         this.equalizer = new EqualizerController(audio.equalizer(), settings);
         this.account = new YoutubeAccount(new GoogleOAuth(GoogleOAuth.ClientConfig.bundled(),
-                dirs.root().resolve("google_account.json")), library, downloads);
+                dirs.root().resolve("google_account.json")), database, library, downloads);
     }
 
     public void addListener(Listener listener) {

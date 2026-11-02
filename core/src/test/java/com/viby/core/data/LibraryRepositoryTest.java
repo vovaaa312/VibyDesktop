@@ -81,6 +81,21 @@ class LibraryRepositoryTest {
     }
 
     @Test
+    void copyTracksSharesFilesAndSkipsVideosAlreadyInTarget() throws Exception {
+        Path file = Files.writeString(temp.resolve("song.mp3"), "audio");
+        Track source = library.insert(track("Source", "s1", file.toString()));
+        library.insert(track("Target", "t1", null));
+        assertEquals(1, library.copyTracks(List.of(source.id), "Target"));
+        assertEquals(0, library.copyTracks(List.of(source.id), "Target"));
+        assertEquals(List.of("s1", "t1"), library.tracks("Target").stream().map(t -> t.videoId).toList());
+        assertEquals(1, library.tracks("Source").size());
+        Track copy = library.findInPlaylist("Target", "s1");
+        assertEquals(file.toString(), copy.filePath);
+        assertTrue(copy.downloaded);
+        assertNull(copy.youtubePlaylistItemId);
+    }
+
+    @Test
     void persistsAcrossReopen() throws Exception {
         library.insert(track("Keep", "k", null));
         LibraryRepository reopened = new LibraryRepository(open());

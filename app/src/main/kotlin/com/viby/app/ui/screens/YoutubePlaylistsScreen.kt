@@ -31,6 +31,7 @@ import com.viby.app.state.AppState
 import com.viby.app.state.Screen
 import com.viby.app.theme.VibyColors
 import com.viby.app.ui.CoverArt
+import com.viby.app.ui.ScrollLazyColumn
 import com.viby.app.ui.EmptyHint
 import com.viby.app.ui.tracksLabel
 
@@ -76,7 +77,7 @@ fun YoutubePlaylistsScreen(state: AppState) {
                 ) { Text("Войти через Google") }
             }
             account.playlists?.isEmpty() == true -> EmptyHint("Плейлистов нет", "На канале пока нет своих плейлистов.")
-            else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            else -> ScrollLazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(account.playlists.orEmpty(), key = { it.id() }) { playlist ->
                     val local = state.library.playlist(playlist.title())
                     Row(

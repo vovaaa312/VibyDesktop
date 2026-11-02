@@ -1,7 +1,5 @@
 package com.viby.app.ui.screens
 
-import androidx.compose.foundation.ContextMenuArea
-import androidx.compose.foundation.ContextMenuItem
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -40,6 +38,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.scale
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Switch
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.SolidColor
@@ -51,7 +53,10 @@ import com.viby.app.model.SortMode
 import com.viby.app.model.Track
 import com.viby.app.state.AppState
 import com.viby.app.ui.ClickKind
+import com.viby.app.ui.ContextMenuBox
 import com.viby.app.ui.CoverArt
+import com.viby.app.ui.MenuAction
+import com.viby.app.ui.ScrollLazyColumn
 import com.viby.app.ui.EmptyHint
 import com.viby.app.ui.IconAction
 import com.viby.app.ui.PlayButton
@@ -95,8 +100,18 @@ fun PlaylistScreen(state: AppState, playlistId: String) {
     fun actionTargets(track: Track): List<Track> =
         if (track.id in selection) visible.filter { it.id in selection } else listOf(track)
 
-    LazyColumn(Modifier.fillMaxSize(), state = rememberLazyListState()) {
-        item { Header(playlist) }
+    ScrollLazyColumn(Modifier.fillMaxSize()) {
+        item {
+            Header(
+                playlist,
+                syncToggle = if (state.account.isSignedIn && playlist.canSync) {
+                    {
+                        if (playlist.youtubeSynced) state.account.disableSync(playlist.name)
+                        else state.account.enableSync(playlist.name)
+                    }
+                } else null,
+            )
+        }
         item {
             ActionRow(
                 playing = playingHere && player.isPlaying,
@@ -110,6 +125,10 @@ fun PlaylistScreen(state: AppState, playlistId: String) {
                         // re-running the job only downloads tracks that are missing locally
                         state.downloads.enqueue(source, playlist.name) {
                             state.showMessage("Проверяю новые треки в плейлисте YouTube")
+                        }
+                        // two-way sync also sends local additions to YouTube
+                        if (playlist.youtubeSynced && state.account.isSignedIn) {
+                            state.account.pushMissing(playlist.name, quiet = true)
                         }
                     }
                 },
@@ -132,29 +151,36 @@ fun PlaylistScreen(state: AppState, playlistId: String) {
             }
         }
         itemsIndexed(visible, key = { _, track -> track.id }) { index, track ->
-            ContextMenuArea(items = {
-                val targets = actionTargets(track)
-                val label = if (targets.size > 1) " (${targets.size})" else ""
-                buildList {
-                    add(ContextMenuItem("Играть") { state.playPlaylist(playlist.copy(tracks = visible), track) })
-                    add(ContextMenuItem("Играть следующим$label") { player.enqueueNext(targets) })
-                    add(ContextMenuItem("Добавить в очередь$label") { player.enqueue(targets) })
-                    add(ContextMenuItem("Переместить в плейлист…$label") { moveDialog = targets.map { it.id }.toSet() })
-                    if (track.videoId != null) {
-                        add(ContextMenuItem("Радио по треку") { state.downloads.radio(track) })
-                    }
-                    val retryable = targets.filter { !it.isDownloaded && it.videoId != null }
-                    if (retryable.isNotEmpty()) {
-                        add(ContextMenuItem("Повторить загрузку${if (retryable.size > 1) " (${retryable.size})" else ""}") {
-                            retryable.forEach { state.downloads.retry(it, playlist.name) }
+            val targets = actionTargets(track)
+            ContextMenuBox(
+                header = if (targets.size > 1) "Выбрано: ${tracksLabel(targets.size)}" else track.title,
+                actions = {
+                    val ids = targets.map { it.id }.toSet()
+                    val synced = playlist.youtubeSynced && state.account.isSignedIn
+                    buildList {
+                        add(MenuAction("Воспроизвести") { state.playPlaylist(playlist.copy(tracks = visible), track) })
+                        add(MenuAction("Добавить в очередь") { player.enqueue(targets) })
+                        add(MenuAction("Вставить после проигрываемого") { player.enqueueNext(targets) })
+                        if (track.videoId != null) add(MenuAction("Радио по треку") { state.downloads.radio(track) })
+                        add(MenuAction("Отправить в плейлист…") { moveDialog = ids })
+                        if (track.id !in selection) add(MenuAction("Выделить") { selection = selection + track.id })
+                        val retryable = targets.filter { !it.isDownloaded && it.videoId != null }
+                        if (retryable.isNotEmpty()) {
+                            add(MenuAction("Повторить загрузку") {
+                                retryable.forEach { state.downloads.retry(it, playlist.name) }
+                            })
+                        }
+                        add(MenuAction(if (synced) "Удалить из плейлиста и с YouTube" else "Удалить из плейлиста") {
+                            if (synced) state.account.deleteSynced(playlist.name, ids) else state.library.removeTracks(ids)
+                            selection = emptySet()
+                        })
+                        add(MenuAction("Удалить с устройства", danger = true) {
+                            state.library.removeTracks(ids, deleteFiles = true)
+                            selection = emptySet()
                         })
                     }
-                    add(ContextMenuItem("Удалить из плейлиста$label") {
-                        state.library.removeTracks(targets.map { it.id }.toSet())
-                        selection = emptySet()
-                    })
-                }
-            }) {
+                },
+            ) {
                 TrackRow(
                     number = index + 1,
                     track = track,
@@ -181,15 +207,25 @@ fun PlaylistScreen(state: AppState, playlistId: String) {
             playlists = state.library.playlists.filter { it.id != playlist.id },
             onDismiss = { moveDialog = null },
         ) { target ->
-            state.library.moveTracks(ids, target.id)
+            val videoIds = playlist.tracks.filter { it.id in ids }.mapNotNull { it.videoId }
+            state.library.copyTracks(ids, target.id) { added ->
+                state.showMessage(
+                    if (added == 0) "Эти треки уже есть в «${target.name}»"
+                    else "${tracksLabel(added)} → «${target.name}»"
+                )
+                // tracks sent to a synced playlist are added to its YouTube copy too
+                if (added > 0 && target.youtubeSynced && state.account.isSignedIn) {
+                    // only the sent videos: never re-add tracks that were removed on YouTube
+                    state.account.pushMissing(target.name, videoIds, quiet = true)
+                }
+            }
             selection = emptySet()
-            state.showMessage("${tracksLabel(ids.size)} → «${target.name}»")
         }
     }
 }
 
 @Composable
-private fun Header(playlist: Playlist) {
+private fun Header(playlist: Playlist, syncToggle: (() -> Unit)?) {
     val (top, _) = coverColors(playlist.id)
     Row(
         Modifier
@@ -221,6 +257,24 @@ private fun Header(playlist: Playlist) {
                     style = MaterialTheme.typography.bodyMedium,
                     color = VibyColors.TextSecondary,
                 )
+            }
+            if (syncToggle != null) {
+                Spacer(Modifier.height(10.dp))
+                Row(
+                    Modifier.clip(RoundedCornerShape(16.dp)).background(Color.Black.copy(alpha = 0.35f))
+                        .clickable(onClick = syncToggle).padding(start = 12.dp, end = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Синхронизация с YouTube", style = MaterialTheme.typography.bodyMedium,
+                        color = VibyColors.TextPrimary)
+                    Spacer(Modifier.width(8.dp))
+                    Switch(
+                        checked = playlist.youtubeSynced,
+                        onCheckedChange = { syncToggle() },
+                        colors = SwitchDefaults.colors(checkedTrackColor = VibyColors.Accent),
+                        modifier = Modifier.scale(0.75f),
+                    )
+                }
             }
         }
     }
@@ -332,9 +386,9 @@ private fun MoveDialog(playlists: List<Playlist>, onDismiss: () -> Unit, onMove:
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = VibyColors.Elevated,
-        title = { Text("Переместить в плейлист") },
+        title = { Text("Отправить в плейлист") },
         text = {
-            LazyColumn(Modifier.height(320.dp)) {
+            ScrollLazyColumn(Modifier.height(320.dp)) {
                 itemsIndexed(playlists) { _, target ->
                     Row(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp))

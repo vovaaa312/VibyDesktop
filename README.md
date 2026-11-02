@@ -20,17 +20,23 @@ External tools are downloaded on first launch into the app data directory
 (`%LOCALAPPDATA%\Viby`, `~/Library/Application Support/Viby`, `~/.local/share/viby`):
 yt-dlp (auto-updated daily), FFmpeg and Deno (JavaScript runtime required by yt-dlp for YouTube).
 
+## Features (1.0)
+
+- Download YouTube videos, playlists and Mixes to MP3/M4A with cover art and tags (yt-dlp + FFmpeg)
+- Persistent download queue: pause, cancel, retries, resume after restart, shared files across playlists
+- Library of playlists in SQLite (same schema as the Android app), search, sorting, multi-select
+- Player with queue, shuffle/repeat, online streaming of tracks that are still downloading
+- 20-band equalizer with presets, preamp and user presets
+- Lyrics from YouTube Music with subtitle fallback
+- Google sign-in: your YouTube playlists (private ones too), save playlists to YouTube, two-way sync
+- Track radio, cookies from a browser or cookies.txt for age-restricted/private content
+- Media keys, middle-click autoscroll, daily update check against GitHub releases
+
 ## Roadmap
 
-- [x] Stage 0 — project skeleton, CI
-- [x] Stage 1 — yt-dlp engine: binary manager, downloads to MP3 with cover and tags, cookies
-- [ ] Stage 2 — SQLite library (same schema as Android)
-- [ ] Stage 3 — persistent download queue (pause, cancel, reorder, retry, placeholders)
-- [ ] Stage 4 — playback engine, 20-band equalizer, queue, online streaming of pending tracks
-- [ ] Stage 5 — Compose UI
-- [ ] Stage 6 — lyrics (YouTube Music + subtitles)
-- [ ] Stage 7 — YouTube account sync, Track radio
-- [ ] Stage 8 — installers (msi / dmg / deb), app updates
+- Expandable download queue (per-track reordering) — 1.0.1
+- System media controls: Windows SMTC, macOS Now Playing, Linux MPRIS
+- Local file import, drag & drop links, library export/import with Android
 
 ## Building
 
@@ -39,8 +45,16 @@ Requirements: JDK 21 (for example the JBR bundled with Android Studio or Temurin
 ```bash
 ./gradlew build        # compile + tests
 ./gradlew :app:run     # run the app
-./gradlew :app:packageDistributionForCurrentOS   # installer (needs a JDK with jpackage)
+./gradlew :app:packageMsi -PpackagingJavaHome=<JDK with jpackage>   # installer
 ```
+
+### Releases
+
+Push a tag `vX.Y.Z` (matching `version` in `build.gradle.kts`); the `release` workflow builds the
+.msi, .dmg and .deb installers and publishes them. Installed apps check the latest release once a day.
+
+Google sign-in needs a Desktop OAuth client: locally a `client_secret*.json` in the project root, in CI
+the repository secret `GOOGLE_OAUTH_CLIENT` with the same JSON. Neither is committed.
 
 ## Disclaimer
 

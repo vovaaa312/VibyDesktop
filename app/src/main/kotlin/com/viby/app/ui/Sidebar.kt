@@ -1,7 +1,5 @@
 package com.viby.app.ui
 
-import androidx.compose.foundation.ContextMenuArea
-import androidx.compose.foundation.ContextMenuItem
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.hoverable
@@ -31,10 +29,12 @@ import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material.icons.rounded.SystemUpdateAlt
 import androidx.compose.material.icons.rounded.VideoLibrary
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -91,17 +91,18 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
                         color = VibyColors.TextSecondary, modifier = Modifier.weight(1f))
                     IconAction(Icons.Rounded.Add, "Создать плейлист", { dialog = PlaylistDialog.Create })
                 }
-                LazyColumn(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+                ScrollLazyColumn(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
                     items(state.library.playlists, key = { it.id }) { playlist ->
-                        ContextMenuArea(items = {
-                            listOf(
-                                ContextMenuItem("Играть") { state.playPlaylist(playlist) },
-                                ContextMenuItem("Перемешать") { state.playPlaylist(playlist, shuffle = true) },
-                                ContextMenuItem("Переименовать") { dialog = PlaylistDialog.Rename(playlist) },
-                                ContextMenuItem("Удалить") { dialog = PlaylistDialog.Delete(playlist) },
-                            ) + if (state.account.isSignedIn) listOf(
-                                ContextMenuItem("Сохранить на YouTube") { state.account.saveToYoutube(playlist.name) },
-                            ) else emptyList()
+                        ContextMenuBox(header = playlist.name, actions = {
+                            buildList {
+                                add(MenuAction("Воспроизвести") { state.playPlaylist(playlist) })
+                                add(MenuAction("Перемешать") { state.playPlaylist(playlist, shuffle = true) })
+                                add(MenuAction("Переименовать") { dialog = PlaylistDialog.Rename(playlist) })
+                                if (state.account.isSignedIn && !playlist.youtubeSynced) {
+                                    add(MenuAction("Сохранить на YouTube") { state.account.saveToYoutube(playlist.name) })
+                                }
+                                add(MenuAction("Удалить", danger = true) { dialog = PlaylistDialog.Delete(playlist) })
+                            }
                         }) {
                             PlaylistItem(
                                 playlist = playlist,
@@ -115,6 +116,7 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
         }
         Panel(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(vertical = 4.dp)) {
+                UpdateItem(state)
                 NavItem(Icons.Rounded.GraphicEq, "Эквалайзер", state.screen == Screen.Equalizer) {
                     state.navigate(Screen.Equalizer)
                 }
@@ -151,6 +153,66 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
             dismissButton = { TextButton(onClick = { dialog = null }) { Text("Отмена") } },
         )
         null -> Unit
+    }
+}
+
+/** App update entry: manual check, or a highlighted "update to vX" with download progress. */
+@Composable
+private fun UpdateItem(state: AppState) {
+    val updates = state.updates
+    val update = updates.available
+    val progress = updates.downloadProgress
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    val highlight = update != null
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(
+                when {
+                    highlight -> VibyColors.Accent.copy(alpha = if (hovered) 0.35f else 0.22f)
+                    hovered -> VibyColors.Hover
+                    else -> Color.Transparent
+                }
+            )
+            .hoverable(interaction)
+            .clickable(interactionSource = interaction, indication = null) {
+                if (update != null) updates.prompt = true else updates.checkNow()
+            }
+            .pointerHoverIcon(PointerIcon.Hand)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Rounded.SystemUpdateAlt, null,
+            tint = if (highlight) VibyColors.AccentBright else VibyColors.TextSecondary,
+            modifier = Modifier.size(24.dp),
+        )
+        Spacer(Modifier.width(16.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                when {
+                    progress != null -> "Скачиваю обновление… ${(progress * 100).toInt()}%"
+                    update != null -> "Обновить до ${update.version()}"
+                    updates.checking -> "Проверяю обновления…"
+                    else -> "Проверить обновления"
+                },
+                style = MaterialTheme.typography.titleSmall,
+                color = if (highlight || hovered) VibyColors.TextPrimary else VibyColors.TextSecondary,
+            )
+            Text("Viby ${updates.version}", style = MaterialTheme.typography.bodySmall, color = VibyColors.TextMuted)
+            if (progress != null) {
+                Spacer(Modifier.height(4.dp))
+                LinearProgressIndicator(
+                    progress = { progress },
+                    color = VibyColors.Accent,
+                    trackColor = VibyColors.Highlight,
+                    modifier = Modifier.fillMaxWidth().height(3.dp),
+                )
+            }
+        }
     }
 }
 

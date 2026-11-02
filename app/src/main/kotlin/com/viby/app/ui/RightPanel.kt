@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -24,10 +25,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -43,6 +46,10 @@ import com.viby.app.model.Track
 import com.viby.app.state.AppState
 import com.viby.app.state.SidePanel
 import com.viby.app.theme.VibyColors
+import com.viby.core.auth.CookieSource
+import com.viby.core.lyrics.YoutubeLyricsRepository
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 fun RightPanel(state: AppState, modifier: Modifier = Modifier) {
@@ -100,7 +107,7 @@ private fun QueueList(state: AppState) {
         EmptyHint("Очередь пуста", "Запустите плейлист или трек — здесь появится то, что играет дальше.")
         return
     }
-    LazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 8.dp)) {
+    ScrollLazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 8.dp)) {
         itemsIndexed(player.queue, key = { index, track -> "$index-${track.id}" }) { index, track ->
             QueueItem(
                 track = track,
@@ -164,27 +171,66 @@ private fun Lyrics(state: AppState) {
         return
     }
     val (top, bottom) = coverColors(track.id)
-    Column(
+    val result by produceState<LyricsResult>(LyricsResult.Loading, track.id) {
+        value = withContext(Dispatchers.IO) { loadLyrics(state, track) }
+    }
+    ScrollColumn(
         Modifier
             .fillMaxSize()
             .padding(12.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(Brush.verticalGradient(listOf(top.copy(alpha = 0.85f), bottom)))
-            .verticalScroll(rememberScrollState())
-            .padding(20.dp),
+            .background(Brush.verticalGradient(listOf(top.copy(alpha = 0.85f), bottom))),
+        contentModifier = Modifier.padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Text(track.title, style = MaterialTheme.typography.titleMedium, color = Color.White)
         Text(track.artist, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.7f))
         Spacer(Modifier.height(12.dp))
-        Text(
-            "Тексты песен подключим следующим этапом: сначала YouTube Music, затем субтитры видео.",
-            color = Color.White,
-            fontSize = 18.sp,
-            lineHeight = 30.sp,
-            fontWeight = FontWeight.Bold,
-        )
+        when (val current = result) {
+            LyricsResult.Loading -> CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp,
+                modifier = Modifier.size(28.dp))
+            is LyricsResult.Missing -> Text(current.message, color = Color.White.copy(alpha = 0.8f),
+                style = MaterialTheme.typography.bodyLarge)
+            is LyricsResult.Found -> {
+                Text(
+                    current.text,
+                    color = Color.White,
+                    fontSize = 20.sp,
+                    lineHeight = 31.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(Modifier.height(16.dp))
+                Text(current.source, color = Color.White.copy(alpha = 0.6f), style = MaterialTheme.typography.bodySmall)
+            }
+        }
     }
+}
+
+private sealed interface LyricsResult {
+    data object Loading : LyricsResult
+    data class Found(val text: String, val source: String) : LyricsResult
+    data class Missing(val message: String) : LyricsResult
+}
+
+/** YouTube Music lyrics first, then manual and automatic subtitles (Android order). */
+private fun loadLyrics(state: AppState, track: Track): LyricsResult = try {
+    val cookies = state.settings.cookieSource().takeIf { it.type() == CookieSource.Type.FILE }?.file()
+    val lyrics = YoutubeLyricsRepository.load(cookies, track.videoId, track.sourceUrl)
+    val source = when (lyrics.source) {
+        YoutubeLyricsRepository.Source.YOUTUBE_MUSIC -> lyrics.detail ?: "YouTube Music"
+        YoutubeLyricsRepository.Source.MANUAL_SUBTITLES -> "Субтитры видео (${lyrics.detail})"
+        YoutubeLyricsRepository.Source.AUTOMATIC_SUBTITLES -> "Автоматические субтитры (${lyrics.detail})"
+        null -> ""
+    }
+    LyricsResult.Found(lyrics.text, source)
+} catch (e: YoutubeLyricsRepository.MissingLyricsException) {
+    LyricsResult.Missing(
+        if (e.reason == YoutubeLyricsRepository.MissingReason.NO_YOUTUBE_SOURCE) "Трек не связан с YouTube — текст взять неоткуда"
+        else "Для этого трека текста нет ни в YouTube Music, ни в субтитрах"
+    )
+} catch (e: Throwable) {
+    // lyrics are optional: no failure here (network, YouTube changes, linkage errors) may close the app
+    LyricsResult.Missing("Не удалось загрузить текст: ${e.message ?: e.javaClass.simpleName}")
 }
 
 @Composable

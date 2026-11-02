@@ -48,6 +48,30 @@ public final class Database implements AutoCloseable {
         return database;
     }
 
+    /** Runs {@code body} atomically (Room's runInTransaction). Nested calls join the outer one. */
+    public void runInTransaction(Runnable body) {
+        synchronized (connection) {
+            try {
+                if (!connection.getAutoCommit()) {
+                    body.run();
+                    return;
+                }
+                connection.setAutoCommit(false);
+                try {
+                    body.run();
+                    connection.commit();
+                } catch (RuntimeException e) {
+                    connection.rollback();
+                    throw e;
+                } finally {
+                    connection.setAutoCommit(true);
+                }
+            } catch (SQLException e) {
+                throw new IllegalStateException(e);
+            }
+        }
+    }
+
     /** JDBC connections are not thread-safe; every DAO call synchronizes on it. */
     Connection connection() {
         return connection;

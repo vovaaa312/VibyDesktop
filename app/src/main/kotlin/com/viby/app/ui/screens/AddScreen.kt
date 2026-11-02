@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.sp
 import com.viby.app.state.AppState
 import com.viby.app.state.Screen
 import com.viby.app.theme.VibyColors
+import com.viby.app.ui.ScrollColumn
 import com.viby.app.ui.CoverArt
 import com.viby.app.ui.IconAction
 import com.viby.app.ui.NameDialog
@@ -80,9 +81,9 @@ fun AddScreen(state: AppState) {
     val kind = classify(clean, onlyVideo && hasBoth)
     val requestUrl = if (onlyVideo && hasBoth) "https://www.youtube.com/watch?v=$videoId" else clean
 
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState())
-            .padding(start = 48.dp, end = 48.dp, top = 64.dp, bottom = 48.dp),
+    ScrollColumn(
+        Modifier.fillMaxSize(),
+        contentModifier = Modifier.padding(start = 48.dp, end = 48.dp, top = 64.dp, bottom = 48.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Column(Modifier.widthIn(max = 720.dp).fillMaxWidth()) {

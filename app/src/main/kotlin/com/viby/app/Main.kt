@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -55,23 +56,72 @@ import com.viby.app.ui.screens.PlaylistScreen
 import com.viby.app.ui.screens.SettingsScreen
 import com.viby.app.ui.screens.YoutubePlaylistsScreen
 import com.viby.core.VibyEngine
+import com.viby.core.platform.AppDirs
 import com.viby.core.tools.Tool
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.graphics.toComposeImageBitmap
+import org.jetbrains.skia.Image
 import java.awt.Dimension
+import kotlin.system.exitProcess
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+
+/** Writes uncaught exceptions to &lt;app dir&gt;/logs/crash.log so crashes can be diagnosed later. */
+private val crashLogInstalled: Boolean = run {
+    val previous = Thread.getDefaultUncaughtExceptionHandler()
+    Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+        runCatching {
+            val log = AppDirs.current().logs().resolve("crash.log").toFile()
+            val trace = java.io.StringWriter().also { error.printStackTrace(java.io.PrintWriter(it)) }
+            log.appendText("=== ${java.time.LocalDateTime.now()} [${thread.name}]\n$trace\n")
+        }
+        previous?.uncaughtException(thread, error) ?: error.printStackTrace()
+    }
+    true
+}
 
 fun main() = application {
+    check(crashLogInstalled)
+    val appIcon = remember {
+        BitmapPainter(Image.makeFromEncoded(AppState::class.java.getResource("/viby_icon.png")!!.readBytes())
+            .toComposeImageBitmap())
+    }
     val state = remember {
         AppState().also {
             CoverCache.directory = it.dirs.root().resolve("covers")
             it.start()
+            it.updates.checkOnStart()
+            MediaKeys.register(it.dirs.logs().resolve("media-keys.log").toFile()) { action ->
+                it.scope.launch {
+                    when (action) {
+                        MediaKeys.Action.PLAY_PAUSE -> it.player.togglePlay()
+                        MediaKeys.Action.NEXT -> it.player.next()
+                        MediaKeys.Action.PREVIOUS -> it.player.previous()
+                        MediaKeys.Action.STOP -> if (it.player.isPlaying) it.player.togglePlay()
+                    }
+                }
+            }
         }
     }
+    var visible by remember { mutableStateOf(true) }
     Window(
         onCloseRequest = {
-            state.close()
-            exitApplication()
+            // hide at once; cleanup (hook, downloads, audio, database) must not keep the window frozen
+            visible = false
+            val cleanup = Thread({
+                runCatching { MediaKeys.unregister() }
+                state.close()
+            }, "viby-shutdown").apply { isDaemon = true; start() }
+            cleanup.join(3_000)
+            // an interrupted download simply resumes on the next start
+            exitProcess(0)
         },
+        visible = visible,
         title = "Viby",
+        icon = appIcon,
         state = rememberWindowState(size = DpSize(1360.dp, 860.dp)),
         onKeyEvent = { event ->
             if (event.type != KeyEventType.KeyDown) return@Window false
@@ -133,7 +183,28 @@ fun App(state: AppState) {
             PlayerBar(state)
         }
         Toast(state, Modifier.align(Alignment.BottomCenter).padding(bottom = 100.dp))
+        UpdateDialog(state)
     }
+}
+
+@Composable
+private fun UpdateDialog(state: AppState) {
+    val updates = state.updates
+    val update = updates.available ?: return
+    if (!updates.prompt) return
+    AlertDialog(
+        onDismissRequest = { updates.prompt = false },
+        containerColor = VibyColors.Elevated,
+        title = { Text("Доступна новая версия ${update.version()}") },
+        text = {
+            Text(
+                "Сейчас установлена ${updates.version}. Установщик скачается с GitHub, " +
+                    "будет проверен по SHA-256 и запустится, а Viby закроется.",
+            )
+        },
+        confirmButton = { TextButton(onClick = updates::install) { Text("Обновить") } },
+        dismissButton = { TextButton(onClick = { updates.prompt = false }) { Text("Позже") } },
+    )
 }
 
 /** First-launch tool installation progress, or the error with a retry button. */

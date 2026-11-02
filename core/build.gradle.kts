@@ -50,3 +50,18 @@ tasks.processResources {
         rename { "google_oauth.json" }
     }
 }
+
+tasks.register<JavaExec>("devLyrics") {
+    group = "verification"
+    description = "Fetches lyrics for the given video ids from live YouTube."
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass = "com.viby.core.DevLyrics"
+    jvmArgs("-Dstdout.encoding=UTF-8")
+}
+
+tasks.register<JavaExec>("devAccount") {
+    group = "verification"
+    description = "Checks the stored Google sign-in of the real app directory (read-only)."
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass = "com.viby.core.DevAccount"
+}

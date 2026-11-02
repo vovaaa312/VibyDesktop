@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.viby.app.state.AppState
 import com.viby.app.theme.VibyColors
+import com.viby.app.ui.ScrollColumn
 import com.viby.app.ui.CoverArt
 import com.viby.core.auth.CookieSource
 import com.viby.core.settings.Settings
@@ -54,8 +55,9 @@ fun SettingsScreen(state: AppState) {
         settings.setCookieSource(source)
     }
 
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 32.dp, end = 32.dp, top = 64.dp, bottom = 24.dp),
+    ScrollColumn(
+        Modifier.fillMaxSize(),
+        contentModifier = Modifier.padding(start = 32.dp, end = 32.dp, top = 64.dp, bottom = 24.dp),
     ) {
         Column(Modifier.widthIn(max = 760.dp)) {
             Text("Настройки", style = MaterialTheme.typography.headlineMedium, color = VibyColors.TextPrimary)
