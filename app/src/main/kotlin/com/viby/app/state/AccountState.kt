@@ -76,6 +76,30 @@ class AccountState(private val app: AppState) {
         app.scope.launch { app.showMessage("«${playlist.title()}» добавлен в загрузки") }
     }
 
+    /** Android YoutubeSyncController.showPlaylistDialog for an unsaved radio. */
+    fun offerSaveRadio(playlistName: String) {
+        app.ask(
+            "Сохранить радио на YouTube?",
+            "В медиатеке YouTube будет создан приватный плейлист с текущими треками радио. " +
+                "Дальнейшие подтверждённые добавления и удаления можно будет синхронизировать.",
+            PromptAction("Сохранить приватно") { saveRadio(playlistName) },
+        )
+    }
+
+    private fun saveRadio(playlistName: String) {
+        app.showMessage("Создаю приватный плейлист на YouTube…")
+        task {
+            val result = account.saveRadio(playlistName)
+            app.scope.launch {
+                app.showMessage(
+                    if (result.failedCount == 0) "«${result.remoteTitle}» сохранён на YouTube · треков: ${result.addedCount}"
+                    else "«${result.remoteTitle}» сохранён на YouTube · добавлено: ${result.addedCount} · " +
+                        "ошибок: ${result.failedCount} (${result.firstError})"
+                )
+            }
+        }
+    }
+
     fun saveToYoutube(playlistName: String) = task {
         account.saveToYoutube(playlistName, null)
         app.scope.launch { app.showMessage("«$playlistName» сохранён на YouTube как приватный плейлист") }

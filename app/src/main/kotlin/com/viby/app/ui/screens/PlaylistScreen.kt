@@ -30,6 +30,8 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AccessTime
 import androidx.compose.material.icons.rounded.AudioFile
+import androidx.compose.material.icons.rounded.CloudUpload
+import androidx.compose.foundation.border
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Shuffle
@@ -130,6 +132,9 @@ fun PlaylistScreen(state: AppState, playlistId: String) {
                 onPlay = onPlay,
                 onShuffle = { state.playPlaylist(playlist, shuffle = true) },
                 onImport = { state.library.importFiles(playlist.name) },
+                onSaveRadio = if (state.account.isSignedIn && playlist.isUnsavedRadio) {
+                    { state.account.offerSaveRadio(playlist.name) }
+                } else null,
                 onSync = {
                     val source = playlist.sourceUrl
                     if (source == null) {
@@ -265,6 +270,8 @@ private fun ActionRow(
     onShuffle: () -> Unit,
     onSync: () -> Unit,
     onImport: () -> Unit,
+    /** Android "Сохранить радио на YouTube"; null hides the button. */
+    onSaveRadio: (() -> Unit)?,
     query: String,
     onQuery: (String) -> Unit,
     sort: SortMode,
@@ -280,11 +287,33 @@ private fun ActionRow(
         IconAction(Icons.Rounded.Shuffle, "Перемешать", onShuffle, size = 40.dp, iconSize = 28.dp)
         IconAction(Icons.Rounded.Sync, "Обновить из YouTube", onSync, size = 40.dp, iconSize = 26.dp)
         IconAction(Icons.Rounded.AudioFile, "Добавить файлы с компьютера", onImport, size = 40.dp, iconSize = 24.dp)
+        onSaveRadio?.let { SaveRadioButton(showLabel = !compact, onClick = it) }
         // the search box shrinks before anything else when the column gets narrow
         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
             SearchField(query, onQuery, modifier = Modifier.widthIn(max = 240.dp).fillMaxWidth())
         }
         SortMenu(sort, onSort, showLabel = !compact)
+    }
+}
+
+/** Pill button so saving a radio is as easy to find as on Android, icon only when narrow. */
+@Composable
+private fun SaveRadioButton(showLabel: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .border(1.dp, VibyColors.TextMuted, RoundedCornerShape(20.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Rounded.CloudUpload, "Сохранить радио на YouTube", tint = VibyColors.TextPrimary,
+            modifier = Modifier.size(18.dp))
+        if (showLabel) {
+            Spacer(Modifier.width(8.dp))
+            Text("Сохранить на YouTube", style = MaterialTheme.typography.bodyMedium, color = VibyColors.TextPrimary,
+                maxLines = 1)
+        }
     }
 }
 

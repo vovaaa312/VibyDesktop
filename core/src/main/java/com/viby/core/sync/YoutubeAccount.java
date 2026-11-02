@@ -139,6 +139,15 @@ public final class YoutubeAccount {
                 playlistName, playlist.title(), entries);
     }
 
+    /** Android saveRadio: the radio snapshot becomes a private YouTube playlist linked for sync. */
+    public YoutubePlaylistSync.SaveRadioResult saveRadio(String playlistName) throws Exception {
+        try {
+            return sync.saveRadioToYoutube(playlistName, oauth.accessToken());
+        } finally {
+            library.notifyChanged();
+        }
+    }
+
     /**
      * Creates a private YouTube playlist with the YouTube tracks of a local playlist
      * (Android saves radio snapshots the same way). Returns the playlist URL.

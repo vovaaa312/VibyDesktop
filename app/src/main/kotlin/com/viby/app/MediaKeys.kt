@@ -35,11 +35,15 @@ object MediaKeys {
 
     /**
      * @param logFile receives hook status and media/volume keys only (never other keys)
+     * @param nativeDir writable folder for the hook DLL; by default it is extracted next to the
+     *   app jar, which the installed app cannot write (Program Files: "Access denied")
      * @return false when the OS refused the hook (e.g. Wayland, missing accessibility rights)
      */
-    fun register(logFile: File?, onAction: (Action) -> Unit): Boolean {
+    fun register(logFile: File?, nativeDir: File, onAction: (Action) -> Unit): Boolean {
         if (listener != null) return true
         log = logFile
+        nativeDir.mkdirs()
+        System.setProperty("jnativehook.lib.path", nativeDir.absolutePath)
         // the hook logs every event at INFO by default
         Logger.getLogger(GlobalScreen::class.java.`package`.name).apply {
             level = Level.WARNING

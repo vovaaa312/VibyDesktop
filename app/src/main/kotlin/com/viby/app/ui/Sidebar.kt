@@ -118,7 +118,9 @@ private fun SidebarContent(state: AppState) {
                                 add(MenuAction("Перемешать") { state.playPlaylist(playlist, shuffle = true) })
                                 add(MenuAction("Переименовать") { dialog = PlaylistDialog.Rename(playlist) })
                                 add(MenuAction("Добавить файлы с компьютера…") { state.library.importFiles(playlist.name) })
-                                if (state.account.isSignedIn && !playlist.canSync) {
+                                if (state.account.isSignedIn && playlist.isUnsavedRadio) {
+                                    add(MenuAction("Сохранить радио на YouTube") { state.account.offerSaveRadio(playlist.name) })
+                                } else if (state.account.isSignedIn && !playlist.canSync) {
                                     add(MenuAction("Сохранить на YouTube") { state.account.saveToYoutube(playlist.name) })
                                 }
                                 add(MenuAction("Удалить", danger = true) { dialog = PlaylistDialog.Delete(playlist) })

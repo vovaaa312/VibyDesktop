@@ -17,6 +17,7 @@ dependencies {
     implementation(libs.material.icons.extended)
     implementation(libs.coroutines.swing)
     implementation(libs.jnativehook)
+    implementation(libs.jna)
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)

@@ -7,12 +7,14 @@ materialIcons = "1.7.3"
 json = "20260814"
 jspecify = "1.0.0"
 jnativehook = "2.2.2"
+jna = "5.17.0"
 sqlite = "3.54.1.0"
 junit = "6.1.3"
 
 [libraries]
 jspecify = { group = "org.jspecify", name = "jspecify", version.ref = "jspecify" }
 jnativehook = { group = "com.github.kwhat", name = "jnativehook", version.ref = "jnativehook" }
+jna = { group = "net.java.dev.jna", name = "jna", version.ref = "jna" }
 json = { group = "org.json", name = "json", version.ref = "json" }
 sqlite-jdbc = { group = "org.xerial", name = "sqlite-jdbc", version.ref = "sqlite" }
 material3 = { group = "org.jetbrains.compose.material3", name = "material3", version.ref = "material3" }

@@ -1,5 +1,8 @@
 package com.viby.app
 
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -97,18 +100,21 @@ fun main() = application {
             CoverCache.directory = it.dirs.root().resolve("covers")
             it.start()
             it.updates.checkOnStart()
-            MediaKeys.register(it.dirs.logs().resolve("media-keys.log").toFile()) { action ->
-                it.scope.launch {
-                    when (action) {
-                        MediaKeys.Action.PLAY_PAUSE -> it.player.togglePlay()
-                        MediaKeys.Action.NEXT -> it.player.next()
-                        MediaKeys.Action.PREVIOUS -> it.player.previous()
-                        MediaKeys.Action.STOP -> if (it.player.isPlaying) it.player.togglePlay()
-                    }
+        }
+    }
+    val onMediaAction: (MediaKeys.Action) -> Unit = remember {
+        { action ->
+            state.scope.launch {
+                when (action) {
+                    MediaKeys.Action.PLAY_PAUSE -> state.player.togglePlay()
+                    MediaKeys.Action.NEXT -> state.player.next()
+                    MediaKeys.Action.PREVIOUS -> state.player.previous()
+                    MediaKeys.Action.STOP -> if (state.player.isPlaying) state.player.togglePlay()
                 }
             }
         }
     }
+    var mediaControls by remember { mutableStateOf<WindowsMediaControls?>(null) }
     var visible by remember { mutableStateOf(true) }
     Window(
         onCloseRequest = {
@@ -116,6 +122,7 @@ fun main() = application {
             visible = false
             val cleanup = Thread({
                 runCatching { MediaKeys.unregister() }
+                runCatching { mediaControls?.close() }
                 state.close()
             }, "viby-shutdown").apply { isDaemon = true; start() }
             cleanup.join(3_000)
@@ -141,6 +148,22 @@ fun main() = application {
     ) {
         LaunchedEffect(Unit) { window.minimumSize = Dimension(1000, 640) }
         LaunchedEffect(Unit) { state.player.runClock() }
+        LaunchedEffect(Unit) {
+            val log = state.dirs.logs().resolve("media-keys.log").toFile()
+            // Windows: a real media session (flyout, keys go only to the session picked there);
+            // elsewhere, or if it fails, the global keyboard hook
+            val controls = withContext(Dispatchers.IO) { WindowsMediaControls.create(window, log, onMediaAction) }
+            if (controls == null) {
+                withContext(Dispatchers.IO) {
+                    MediaKeys.register(log, state.dirs.root().resolve("native").toFile(), onMediaAction)
+                }
+                return@LaunchedEffect
+            }
+            mediaControls = controls
+            snapshotFlow { state.player.current to state.player.isPlaying }.collect { (track, playing) ->
+                controls.update(track?.title, track?.artist, track?.thumbnailUrl, playing)
+            }
+        }
         VibyTheme { App(state) }
     }
 }

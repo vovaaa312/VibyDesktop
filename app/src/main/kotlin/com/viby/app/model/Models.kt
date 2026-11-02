@@ -1,5 +1,7 @@
 package com.viby.app.model
 
+import com.viby.core.util.YoutubeUrlParser
+
 /** UI models mapped from core entities by LibraryState. */
 data class Track(
     val id: String,
@@ -32,6 +34,10 @@ data class Playlist(
 ) {
     val durationMs: Long get() = tracks.sumOf { it.durationMs }
     val canSync: Boolean get() = youtubePlaylistId != null && !youtubePlaylistId.startsWith("RD")
+
+    /** Android isUnsavedRadio: a track radio not yet saved as a playlist on YouTube. */
+    val isUnsavedRadio: Boolean
+        get() = YoutubeUrlParser.isRadioMixUrl(sourceUrl) && !canSync
 }
 
 enum class RepeatMode { OFF, ALL, ONE }
