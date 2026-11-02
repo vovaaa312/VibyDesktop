@@ -27,6 +27,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.pointerInput
+import com.viby.app.state.PlayerState
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -98,23 +101,44 @@ fun PlayerBar(state: AppState, modifier: Modifier = Modifier) {
                 active = state.sidePanel == SidePanel.LYRICS)
             IconAction(Icons.AutoMirrored.Rounded.QueueMusic, "Очередь", { state.toggleSidePanel(SidePanel.QUEUE) },
                 active = state.sidePanel == SidePanel.QUEUE)
-            IconAction(
-                when {
-                    player.muted || player.volume == 0f -> Icons.AutoMirrored.Rounded.VolumeOff
-                    player.volume < 0.5f -> Icons.AutoMirrored.Rounded.VolumeDown
-                    else -> Icons.AutoMirrored.Rounded.VolumeUp
-                },
-                "Звук", { player.muted = !player.muted },
-            )
-            Box(Modifier.width(110.dp).padding(end = 8.dp)) {
-                SeekBar(if (player.muted) 0f else player.volume, live = true, onSeek = {
-                    player.volume = it.coerceIn(0f, 1f)
-                    player.muted = false
-                })
+            // the mouse wheel over the icon or the slider changes the volume
+            Row(Modifier.volumeWheel(player), verticalAlignment = Alignment.CenterVertically) {
+                IconAction(
+                    when {
+                        player.muted || player.volume == 0f -> Icons.AutoMirrored.Rounded.VolumeOff
+                        player.volume < 0.5f -> Icons.AutoMirrored.Rounded.VolumeDown
+                        else -> Icons.AutoMirrored.Rounded.VolumeUp
+                    },
+                    "Звук", { player.muted = !player.muted },
+                )
+                Box(Modifier.width(110.dp).padding(end = 8.dp)) {
+                    SeekBar(if (player.muted) 0f else player.volume, live = true, onSeek = {
+                        player.volume = it.coerceIn(0f, 1f)
+                        player.muted = false
+                    })
+                }
             }
         }
     }
 }
+
+/** One wheel notch = 5 % of the volume; scrolling up is louder. */
+private fun Modifier.volumeWheel(player: PlayerState): Modifier = pointerInput(player) {
+    awaitPointerEventScope {
+        while (true) {
+            val event = awaitPointerEvent()
+            if (event.type != PointerEventType.Scroll) continue
+            val delta = event.changes.sumOf { it.scrollDelta.y.toDouble() }.toFloat()
+            if (delta != 0f) {
+                val base = if (player.muted) 0f else player.volume
+                player.volume = (base - delta * VOLUME_WHEEL_STEP).coerceIn(0f, 1f)
+                event.changes.forEach { it.consume() }
+            }
+        }
+    }
+}
+
+private const val VOLUME_WHEEL_STEP = 0.05f
 
 @Composable
 private fun TimeLabel(text: String, align: TextAlign) {

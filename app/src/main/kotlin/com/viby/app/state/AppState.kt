@@ -6,10 +6,10 @@ import androidx.compose.runtime.setValue
 import com.viby.app.model.Playlist
 import com.viby.app.model.SortMode
 import com.viby.app.model.Track
+import com.viby.app.ui.tracksLabel
 import com.viby.core.VibyEngine
 import com.viby.core.data.LibraryRepository
-import com.viby.core.download.DownloadManager
-import com.viby.core.download.DownloadManager.JobSnapshot
+import com.viby.core.download.DownloadService
 import com.viby.core.platform.AppDirs
 import com.viby.core.playback.AudioEngine
 import com.viby.core.tools.Tool
@@ -21,6 +21,8 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.awt.FileDialog
+import java.awt.Frame
 import java.io.File
 import com.viby.core.data.Track as CoreTrack
 
@@ -35,6 +37,13 @@ sealed interface Screen {
 }
 
 enum class SidePanel { NONE, QUEUE, LYRICS }
+
+/** Formats ffmpeg decodes that the import dialog offers. */
+private val AUDIO_EXTENSIONS = listOf("mp3", "m4a", "aac", "opus", "ogg", "flac", "wav", "webm", "wma")
+
+class PromptAction(val label: String, val run: () -> Unit)
+
+class Prompt(val title: String, val text: String?, val actions: List<PromptAction>)
 
 /** Root UI state on top of [VibyEngine]. Mutations run on IO; state is published on the Swing thread. */
 class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
@@ -59,6 +68,10 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
     private val backStack = ArrayDeque<Screen>()
     var sidePanel by mutableStateOf(SidePanel.QUEUE)
 
+    /** Open question dialog; shown by the root composable. */
+    var prompt by mutableStateOf<Prompt?>(null)
+        private set
+
     /** Transient snackbar text; consumed by the root composable. */
     var message by mutableStateOf<String?>(null)
         private set
@@ -66,9 +79,10 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
     init {
         engine.addListener { status -> scope.launch { engineStatus = status } }
         engine.library().addListener { library.requestReload() }
-        engine.downloads().addListener { jobs -> scope.launch { downloads.publish(jobs) } }
+        engine.downloads().addListener(downloads::onJobsChanged)
         library.requestReload()
         player.loader = ::loadTrack
+        player.onStateChanged = ::schedulePlaybackSave
         engine.ytDlp().setCookieFailureListener {
             scope.launch {
                 if (!cookieWarningShown) {
@@ -117,7 +131,9 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
         }
         audio.stop()
         player.isLoading = true
-        showMessage("Трек ещё не скачан — играю онлайн")
+        showMessage("Трек ещё не скачан — играю онлайн и скачиваю его первым")
+        // Android: a pending track that starts playing jumps to the front of the download queue
+        if (track.videoId != null && track.playlistName.isNotEmpty()) downloads.prioritize(track)
         scope.launch {
             val url = runCatching { withContext(Dispatchers.IO) { engine.resolveStreamUrl(source) } }
             if (token != loadToken) return@launch
@@ -132,10 +148,91 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
 
     fun start() = engine.start()
 
-    fun close() = runCatching { engine.close() }
+    fun close() = runCatching {
+        savePlaybackNow()
+        engine.close()
+    }
 
     fun showMessage(text: String) {
         message = text
+    }
+
+    /** Question dialog (Android MaterialAlertDialogBuilder): one action = confirm, several = a list. */
+    fun ask(title: String, text: String?, vararg actions: PromptAction) {
+        prompt = Prompt(title, text, actions.toList())
+    }
+
+    fun answer(action: PromptAction?) {
+        prompt = null
+        action?.run?.invoke()
+    }
+
+    /**
+     * Android YoutubeSyncController.addTrackByUrl: a single video for a playlist with a YouTube original may be
+     * added to its YouTube copy too (at the top, like the YouTube app), or only locally.
+     */
+    fun addByUrl(url: String, playlistName: String?, onAccepted: (queued: Boolean) -> Unit) {
+        val clean = url.trim()
+        val synced = playlistName?.takeIf { library.playlist(it)?.canSync == true }
+        val single = !DownloadService.isPlaylistUrl(clean) && YoutubeUrlParser.videoId(clean) != null
+        if (synced == null || !single || !account.isSignedIn) {
+            downloads.enqueueChecked(clean, playlistName, onAccepted)
+            return
+        }
+        ask(
+            "Добавить трек", null,
+            PromptAction("В Viby и YouTube") {
+                val addToYoutube = { account.addTrackAtStart(synced, clean, onAccepted) }
+                downloads.confirmIfDuplicate(clean, synced, onUnique = addToYoutube) { addToYoutube() }
+            },
+            PromptAction("Только в Viby") { downloads.enqueueChecked(clean, synced, onAccepted) },
+        )
+    }
+
+    /**
+     * Android deleteTracksWithChoice: tracks of a playlist with a YouTube original may be removed
+     * there too. Desktop asks whenever the account is signed in, without a separate sync switch.
+     */
+    fun deleteTracks(playlist: Playlist, tracks: List<Track>, deleteFiles: Boolean) {
+        val ids = tracks.map { it.id }.toSet()
+        val localDelete = { library.removeTracks(ids, deleteFiles) }
+        if (!playlist.canSync || !account.isSignedIn || tracks.none { it.videoId != null }) {
+            localDelete()
+            return
+        }
+        ask(
+            "Удалить также на YouTube?", null,
+            PromptAction("Из Viby и YouTube") { account.deleteSynced(playlist.name, ids, deleteFiles) },
+            PromptAction("Только в Viby") { localDelete() },
+        )
+    }
+
+    /**
+     * "Send to playlist" (Android offerTrackCopy): into a playlist with an original YouTube
+     * playlist the user chooses whether the tracks go to YouTube as well.
+     */
+    fun sendTracks(tracks: List<Track>, target: Playlist, onDone: () -> Unit = {}) {
+        val ids = tracks.map { it.id }.toSet()
+        val videoIds = tracks.filter { it.playlistName != target.name }.mapNotNull { it.videoId }.distinct()
+        val copyLocally = { toYoutube: Boolean ->
+            library.copyTracks(ids, target.id) { added ->
+                showMessage(
+                    if (added == 0) "Эти треки уже есть в «${target.name}»"
+                    else "${tracksLabel(added)} → «${target.name}»"
+                )
+                if (toYoutube) account.copyToYoutube(target.name, videoIds)
+            }
+            onDone()
+        }
+        if (!target.canSync || videoIds.isEmpty() || !account.isSignedIn) {
+            copyLocally(false)
+            return
+        }
+        ask(
+            "Добавить в «${target.name}»", null,
+            PromptAction("В Viby и YouTube") { copyLocally(true) },
+            PromptAction("Только в Viby") { copyLocally(false) },
+        )
     }
 
     fun consumeMessage() {
@@ -158,11 +255,64 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
         sidePanel = if (sidePanel == panel) SidePanel.NONE else panel
     }
 
+    /**
+     * Android PlaybackQueueController.playLocalTrack / playResolvedStream: the queue holds the
+     * playable (downloaded) tracks; a pending start track plays as a stream inside a custom queue.
+     */
     fun playPlaylist(playlist: Playlist, start: Track? = null, shuffle: Boolean = false) {
-        val tracks = playlist.tracks
-        if (tracks.isEmpty()) return
-        player.shuffle = shuffle
-        player.playQueue(tracks, start ?: if (shuffle) tracks.random() else tracks.first(), playlist.id)
+        val playable = playable(playlist.tracks)
+        if (shuffle) player.setShuffleEnabled(true)
+        if (start != null && !isPlayableLocal(start)) {
+            // keep the pending track at its place among the local ones
+            val queue = playlist.tracks.filter { it.id == start.id || isPlayableLocal(it) }
+            player.playWithPending(queue, start, playlist.id)
+            return
+        }
+        if (playable.isEmpty()) {
+            showMessage("В плейлисте пока нет скачанных треков")
+            return
+        }
+        player.playQueue(playable, start ?: if (shuffle) playable.random() else playable.first(), playlist.id)
+    }
+
+    /** Android PlaybackQueueController.isPlayableLocal: downloaded and the file is still there. */
+    fun isPlayableLocal(track: Track): Boolean =
+        track.isDownloaded && track.filePath != null && File(track.filePath).isFile
+
+    fun playable(tracks: List<Track>): List<Track> = tracks.filter(::isPlayableLocal)
+
+    /** Android PlaybackQueueController.resetToActivePlaylist. */
+    fun resetQueue() {
+        val playlist = player.contextPlaylistId?.let(library::playlist)
+        player.resetTo(playable(playlist?.tracks.orEmpty()), playlist?.id)
+        showMessage("Очередь сброшена")
+    }
+
+    private var saveJob: kotlinx.coroutines.Job? = null
+
+    /** Android queueSaver: persist 300 ms after the last change. */
+    private fun schedulePlaybackSave() {
+        saveJob?.cancel()
+        saveJob = scope.launch {
+            delay(300)
+            savePlaybackNow()
+        }
+    }
+
+    private fun savePlaybackNow() {
+        runCatching { settings.putJson("playback", player.saveState()) }
+    }
+
+    private var playbackRestored = false
+
+    /** Restores the last queue once the library is loaded (PlaybackStateStore.restore). */
+    internal fun onLibraryLoaded() {
+        if (playbackRestored) {
+            player.contextPlaylistId?.let { id -> library.playlist(id)?.let { player.syncWithPlaylist(id, playable(it.tracks)) } }
+            return
+        }
+        playbackRestored = true
+        player.restoreState(settings.getJson("playback")) { id -> library.findTrack(id)?.takeIf(::isPlayableLocal) }
     }
 
     /** Runs blocking core work off the UI thread and reports failures as a toast. */
@@ -204,6 +354,7 @@ class LibraryState(private val app: AppState) {
                 val fresh = runCatching { withContext(Dispatchers.IO) { load(app.engine.library()) } }.getOrNull() ?: continue
                 playlists = withLiveProgress(fresh, app.downloads.jobs)
                 loaded = true
+                app.onLibraryLoaded()
                 delay(100) // coalesce bursts of library notifications
             }
         }
@@ -223,7 +374,10 @@ class LibraryState(private val app: AppState) {
         app.scope.launch { onCreated(name) }
     }
 
-    fun delete(name: String) = app.io { app.engine.library().deletePlaylist(name) }
+    fun delete(name: String) {
+        app.player.clearIfLoaded(name)
+        app.io { app.engine.library().deletePlaylist(name) }
+    }
 
     fun rename(from: String, to: String) = app.io {
         if (!app.engine.library().renamePlaylist(from, to)) error("Плейлист «$to» уже существует")
@@ -231,6 +385,24 @@ class LibraryState(private val app: AppState) {
 
     fun removeTracks(trackIds: Set<String>, deleteFiles: Boolean = false) = app.io {
         app.engine.library().removeTracks(trackIds.map(String::toLong), deleteFiles)
+    }
+
+    /** Android "import files" (OpenMultipleDocuments): copies picked audio files into [playlist]. */
+    fun importFiles(playlist: String) {
+        val dialog = FileDialog(null as Frame?, "Добавить файлы в «$playlist»", FileDialog.LOAD).apply {
+            isMultipleMode = true
+            // Windows ignores the filename filter but takes a wildcard list as the initial name
+            file = AUDIO_EXTENSIONS.joinToString(";") { "*.$it" }
+            setFilenameFilter { _, name -> name.substringAfterLast('.', "").lowercase() in AUDIO_EXTENSIONS }
+            isVisible = true
+        }
+        val files = dialog.files.map { it.toPath() }
+        if (files.isEmpty()) return
+        app.showMessage("Импортирую…")
+        app.io {
+            val added = app.engine.files().importFiles(files, playlist)
+            app.scope.launch { app.showMessage("Добавлено: $added") }
+        }
     }
 
     /** "Send to playlist": copies tracks (shared files) and reports how many were added. */
@@ -252,17 +424,20 @@ class LibraryState(private val app: AppState) {
     }
 
     /** Overlays the in-memory progress of the track being downloaded (DB writes are throttled). */
-    fun applyLiveProgress(jobs: List<JobSnapshot>) {
+    fun applyLiveProgress(jobs: List<JobUi>) {
         playlists = withLiveProgress(playlists, jobs)
     }
 
-    private fun withLiveProgress(playlists: List<Playlist>, jobs: List<JobSnapshot>): List<Playlist> {
-        val live = jobs.filter { it.activeTrackId >= 0 }.associate { it.activeTrackId.toString() to it.currentProgress }
+    private fun withLiveProgress(playlists: List<Playlist>, jobs: List<JobUi>): List<Playlist> {
+        // playlist name -> (video id -> progress) of the track each job is downloading right now
+        val live = jobs.filter { it.activeVideoId != null && it.playlistName != null }
+            .groupBy({ it.playlistName!! }, { it.activeVideoId!! to it.progress })
+            .mapValues { it.value.toMap() }
         if (live.isEmpty()) return playlists
         return playlists.map { playlist ->
-            if (playlist.tracks.none { it.id in live }) playlist
-            else playlist.copy(tracks = playlist.tracks.map { track ->
-                val progress = live[track.id]
+            val progressByVideo = live[playlist.name] ?: return@map playlist
+            playlist.copy(tracks = playlist.tracks.map { track ->
+                val progress = track.videoId?.let(progressByVideo::get)
                 if (progress != null && !track.isDownloaded) track.copy(downloadProgress = progress, failed = null)
                 else track
             })
@@ -277,7 +452,6 @@ class LibraryState(private val app: AppState) {
                 tracks = repository.tracks(summary.name).map { it.toUi() },
                 sourceUrl = summary.sourceUrl,
                 coverUrl = summary.coverUrl,
-                youtubeSynced = summary.youtubeSyncEnabled,
                 youtubePlaylistId = summary.youtubePlaylistId,
             )
         }
@@ -295,64 +469,10 @@ class LibraryState(private val app: AppState) {
             thumbnailUrl = thumbnailUrl,
             filePath = filePath.takeIf { downloaded },
             videoId = videoId,
+            playlistName = playlistName,
             sourceUrl = sourceUrl,
             youtubePosition = youtubePosition,
             failed = if (failedState) downloadErrorMessage ?: "Ошибка загрузки" else null,
         )
     }
-}
-
-/** Mirrors [DownloadManager] jobs into Compose state. */
-class DownloadsState(private val app: AppState) {
-    var jobs by mutableStateOf<List<JobSnapshot>>(emptyList())
-        private set
-
-    private var lastActiveTracks = emptySet<Long>()
-
-    val activeCount: Int get() = jobs.count { !it.isFinished }
-
-    internal fun publish(snapshot: List<JobSnapshot>) {
-        jobs = snapshot
-        app.library.applyLiveProgress(snapshot)
-        // a finished track changes the library; the repository already notified, this covers progress only
-        val active = snapshot.map { it.activeTrackId }.filter { it >= 0 }.toSet()
-        if (active != lastActiveTracks) app.library.requestReload()
-        lastActiveTracks = active
-    }
-
-    /** @param playlistName null = name the playlist after the YouTube title */
-    fun enqueue(url: String, playlistName: String?, onQueued: () -> Unit = {}) {
-        if (!app.engine.isReady) {
-            app.showMessage("Подождите: идёт подготовка yt-dlp и FFmpeg")
-            return
-        }
-        if (app.engine.downloads().isQueued(url, playlistName)) {
-            app.showMessage("Эта ссылка уже скачивается — смотрите «Загрузки»")
-            return
-        }
-        app.io {
-            app.engine.downloads().enqueue(url, playlistName)
-            app.scope.launch { onQueued() }
-        }
-    }
-
-    /** Re-queues a failed or pending track; the manager reuses its placeholder row. */
-    fun retry(track: Track, playlistName: String) {
-        val videoId = track.videoId ?: return
-        enqueue("https://www.youtube.com/watch?v=$videoId", playlistName) { app.showMessage("Загрузка поставлена в очередь") }
-    }
-
-    fun radio(track: Track) {
-        val videoId = track.videoId ?: return app.showMessage("Радио доступно только для треков с YouTube")
-        enqueue(YoutubeUrlParser.radioMixUrl(videoId), "Радио: ${track.title}") {
-            app.showMessage("Собираю радио по треку «${track.title}»")
-        }
-    }
-
-    fun pause(id: Long) = app.io { app.engine.downloads().pause(id) }
-    fun resume(id: Long) = app.io { app.engine.downloads().resume(id) }
-    fun cancel(id: Long) = app.io { app.engine.downloads().cancel(id) }
-    fun clearFinished() = app.io { app.engine.downloads().clearFinished() }
-
-    fun isPaused(job: JobSnapshot) = job.status == DownloadManager.Status.PAUSED
 }

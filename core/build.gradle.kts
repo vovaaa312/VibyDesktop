@@ -34,6 +34,14 @@ tasks.register<JavaExec>("devDownload") {
     systemProperty("viby.home", layout.buildDirectory.dir("dev-home").get().asFile.absolutePath)
 }
 
+tasks.register<JavaExec>("devPriority") {
+    group = "verification"
+    description = "Checks queue priority (job and track drags) against real YouTube in build/dev-home."
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass = "com.viby.core.DevPriority"
+    systemProperty("viby.home", layout.buildDirectory.dir("dev-home").get().asFile.absolutePath)
+}
+
 tasks.register<JavaExec>("devQueue") {
     group = "verification"
     description = "Runs one URL through the real download queue in build/dev-home."

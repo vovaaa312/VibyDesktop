@@ -2,9 +2,13 @@ package com.viby.core;
 
 import com.viby.core.data.Database;
 import com.viby.core.data.LibraryRepository;
-import com.viby.core.data.PendingDownloadDao;
+import com.viby.core.data.RoomPendingDownloadDao;
+import com.viby.core.data.LibraryFiles;
+import com.viby.core.data.RoomTrackDao;
 import com.viby.core.download.AudioDownloader;
-import com.viby.core.download.DownloadManager;
+import com.viby.core.download.DownloadService;
+import com.viby.core.download.DuplicateTracks;
+import com.viby.core.download.NetworkMonitor;
 import com.viby.core.download.YoutubeExtractor;
 import com.viby.core.playback.AudioEngine;
 import com.viby.core.playback.EqualizerController;
@@ -54,7 +58,10 @@ public final class VibyEngine implements AutoCloseable {
     private final YtDlp ytDlp;
     private final Database database;
     private final LibraryRepository library;
-    private final DownloadManager downloads;
+    private final DownloadService downloads;
+    private final DuplicateTracks duplicates;
+    private final LibraryFiles files;
+    private final NetworkMonitor network = new NetworkMonitor();
     private final AudioEngine audio;
     private final EqualizerController equalizer;
     private final YoutubeAccount account;
@@ -69,9 +76,14 @@ public final class VibyEngine implements AutoCloseable {
         this.database = Database.open(dirs.database());
         this.library = new LibraryRepository(database);
         YoutubeExtractor extractor = YoutubeExtractor.create(ytDlp, settings::cookieSource);
-        this.downloads = new DownloadManager(extractor, AudioDownloader.create(ytDlp, extractor),
-                ytDlp::destroyProcessById, library, new PendingDownloadDao(database),
-                settings::musicDirectory, settings::audioFormat);
+        // Room-shaped DAO: every write refreshes the library like Room invalidates LiveData
+        RoomTrackDao trackDao = new RoomTrackDao(database, library::notifyChanged);
+        this.downloads = new DownloadService(extractor, AudioDownloader.create(ytDlp, extractor),
+                ytDlp::destroyProcessById, trackDao,
+                RoomPendingDownloadDao.of(database), database.executor, library, network,
+                this::isReady, settings::musicDirectory, settings::audioFormat);
+        this.duplicates = new DuplicateTracks(trackDao);
+        this.files = new LibraryFiles(trackDao, settings::musicDirectory, tools::ffprobe);
         this.audio = new AudioEngine(tools::ffmpeg);
         this.equalizer = new EqualizerController(audio.equalizer(), settings);
         this.account = new YoutubeAccount(new GoogleOAuth(GoogleOAuth.ClientConfig.bundled(),
@@ -97,8 +109,10 @@ public final class VibyEngine implements AutoCloseable {
                 tools.installMissing((tool, done, total) ->
                         setStatus(new Status(State.INSTALLING, tool, done, total, null)));
             }
-            downloads.start();
+            network.start();
+            library.resetInterruptedDownloads();
             setStatus(new Status(State.READY, null, 0, 0, null));
+            downloads.restorePending();
         } catch (Exception e) {
             LOG.log(Level.WARNING, "engine init failed", e);
             setStatus(new Status(State.FAILED, null, 0, 0, e.getMessage()));
@@ -147,8 +161,16 @@ public final class VibyEngine implements AutoCloseable {
         return library;
     }
 
-    public DownloadManager downloads() {
+    public DownloadService downloads() {
         return downloads;
+    }
+
+    public LibraryFiles files() {
+        return files;
+    }
+
+    public DuplicateTracks duplicates() {
+        return duplicates;
     }
 
     public YoutubeAccount account() {
@@ -188,6 +210,7 @@ public final class VibyEngine implements AutoCloseable {
     @Override
     public void close() throws SQLException {
         audio.close();
+        network.stop();
         downloads.shutdown();
         database.close();
     }

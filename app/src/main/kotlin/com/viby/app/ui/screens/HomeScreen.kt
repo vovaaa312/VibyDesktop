@@ -207,7 +207,7 @@ private fun QuickPicks(state: AppState, tracks: List<Track>) {
                             .background(if (hovered) VibyColors.Hover else Color.Transparent)
                             .hoverable(interaction)
                             .clickable(interactionSource = interaction, indication = null) {
-                                state.player.playQueue(tracks, track, null)
+                                state.player.playQueue(state.playable(tracks), track, null)
                             }
                             .padding(6.dp),
                         verticalAlignment = Alignment.CenterVertically,

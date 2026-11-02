@@ -108,7 +108,7 @@ public final class YoutubePlaylistSync {
         final int[] linked = {0};
         store.runInTransaction(() -> {
             List<Track> tracks = store.getPlaylistSync(localPlaylist);
-            // desktop: keep the local order here; local additions are pushed right after enabling
+            // desktop: keep the local order; tracks sent to the top must not drop to the bottom
             linked[0] = linkTracks(tracks, remote, false);
             if (!tracks.isEmpty()) {
                 store.updateAll(tracks);
@@ -269,6 +269,7 @@ public final class YoutubePlaylistSync {
         int added = 0;
         int failed = 0;
         String firstError = null;
+        List<YoutubePlaylistApi.PlaylistItem> inserted = new ArrayList<>();
         for (Track track : missing) {
             try {
                 int position = Math.max(0,
@@ -277,6 +278,7 @@ public final class YoutubePlaylistSync {
                         accessToken, playlistId, track.videoId, position);
                 track.youtubePlaylistItemId = item.id;
                 track.youtubePosition = item.position;
+                inserted.add(item);
                 added++;
             } catch (Exception error) {
                 failed++;
@@ -289,7 +291,7 @@ public final class YoutubePlaylistSync {
         boolean reordered = false;
         if (added > 0) {
             try {
-                linkTracks(tracks, api.listItems(accessToken, playlistId), true);
+                linkTracks(tracks, withInserted(api.listItems(accessToken, playlistId), inserted), true);
                 reordered = true;
             } catch (Exception ignored) {
                 // Insert responses already carry stable item ids; refresh can happen later.
@@ -414,11 +416,7 @@ public final class YoutubePlaylistSync {
         for (Track track : tracks) {
             YoutubePlaylistApi.PlaylistItem match = matches.get(track.id);
             track.youtubePlaylistItemId = match != null ? match.id : null;
-            // desktop: a track that left YouTube keeps its last position as a "came from YouTube"
-            // marker, so automatic pushes (YoutubeAccount.localAdditions) never re-add it
-            if (match != null) {
-                track.youtubePosition = match.position;
-            }
+            track.youtubePosition = match != null ? match.position : null;
         }
         if (reorderLocally) {
             YoutubePlaylistOrder.sort(tracks);
@@ -427,6 +425,38 @@ public final class YoutubePlaylistSync {
             }
         }
         return matches.size();
+    }
+
+    /**
+     * Desktop: playlistItems.list lags behind inserts for a few seconds. Items it does not list
+     * yet are put back at the positions the insert responses reported; otherwise the new tracks
+     * would look removed on YouTube and drop to the end of the local playlist.
+     */
+    static List<YoutubePlaylistApi.PlaylistItem> withInserted(
+            List<YoutubePlaylistApi.PlaylistItem> listed,
+            List<YoutubePlaylistApi.PlaylistItem> inserted) {
+        List<YoutubePlaylistApi.PlaylistItem> merged = new ArrayList<>(listed);
+        for (YoutubePlaylistApi.PlaylistItem item : inserted) {
+            boolean present = false;
+            for (YoutubePlaylistApi.PlaylistItem existing : merged) {
+                if (existing.id.equals(item.id)) {
+                    present = true;
+                    break;
+                }
+            }
+            if (present) {
+                continue;
+            }
+            for (int i = 0; i < merged.size(); i++) {
+                YoutubePlaylistApi.PlaylistItem existing = merged.get(i);
+                if (existing.position >= item.position) {
+                    merged.set(i, new YoutubePlaylistApi.PlaylistItem(
+                            existing.id, existing.videoId, existing.position + 1));
+                }
+            }
+            merged.add(item);
+        }
+        return merged;
     }
 
     public static boolean hasMissingYoutubeTracks(@Nullable List<Track> tracks) {

@@ -181,8 +181,12 @@ public final class LibraryRepository {
             List<Track> toCopy = new ArrayList<>();
             Set<String> seen = new java.util.HashSet<>();
             for (Track source : tracks.byIds(ids)) {
-                boolean duplicate = source.videoId != null && (!seen.add(source.videoId)
-                        || tracks.findInPlaylist(targetPlaylist, source.videoId) != null);
+                // Android PlaylistTrackCopier: YouTube tracks match by video id, local files by path
+                boolean hasVideo = source.videoId != null && !source.videoId.isEmpty();
+                boolean duplicate = hasVideo
+                        ? (!seen.add(source.videoId) || tracks.findInPlaylist(targetPlaylist, source.videoId) != null)
+                        : (source.filePath != null && !source.filePath.isEmpty()
+                        && (!seen.add(source.filePath) || tracks.byFilePath(targetPlaylist, source.filePath) != null));
                 if (!source.playlistName.equals(targetPlaylist) && !duplicate) {
                     toCopy.add(source);
                 }
@@ -218,9 +222,7 @@ public final class LibraryRepository {
 
     /**
      * Android applyYoutubeOrder: tracks present in the source playlist follow its order and get
-     * their source position; the rest keep their relative order after them. Unlike Android, a
-     * track missing from the source keeps its last position as a "came from YouTube" marker
-     * (see YoutubeAccount.localAdditions), so sync never re-adds videos removed on YouTube.
+     * their source position; the rest lose it and keep their relative order after them.
      */
     public void applySourceOrder(String playlistName, Map<String, Integer> sourcePositions) {
         run(() -> database.runInTransaction(() -> {
@@ -233,6 +235,8 @@ public final class LibraryRepository {
                     track.youtubePosition = position;
                     found.add(track);
                 } else {
+                    // Android applyYoutubeOrder: no longer in the source playlist
+                    track.youtubePosition = null;
                     rest.add(track);
                 }
             }
@@ -295,6 +299,10 @@ public final class LibraryRepository {
         notifyChanged();
     }
 
+    public @Nullable PlaylistSource source(String playlistName) {
+        return call(() -> playlists.source(playlistName));
+    }
+
     public void saveSource(PlaylistSource source) {
         run(() -> playlists.upsertSource(source));
     }
@@ -308,7 +316,7 @@ public final class LibraryRepository {
     }
 
     private void deleteFileIfUnused(@Nullable String filePath) throws SQLException {
-        if (filePath == null || filePath.isEmpty() || tracks.countByFilePath(filePath) > 0) {
+        if (filePath == null || !LibraryFiles.shouldDeleteFile(filePath, tracks.countByFilePath(filePath))) {
             return;
         }
         File file = new File(filePath);

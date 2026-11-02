@@ -1,10 +1,11 @@
 package com.viby.core;
 
-import com.viby.core.download.DownloadManager;
+import com.viby.core.download.DownloadJob;
+import com.viby.core.download.DownloadService;
 import com.viby.core.platform.AppDirs;
 
 /**
- * Manual check of the real download queue: {@code ./gradlew :core:devQueue --args="<url>"}.
+ * Manual check of the real download queue: {@code ./gradlew :core:devQueue --args="<url> [playlist]"}.
  * Prints job status changes and stops after the first downloaded track or a failure.
  */
 public final class DevQueue {
@@ -19,25 +20,30 @@ public final class DevQueue {
                 }
                 Thread.sleep(200);
             }
-            long id = engine.downloads().enqueue(args[0], args.length > 1 ? args[1] : null);
+            String url = args[0];
+            engine.downloads().enqueue(url, args.length > 1 ? args[1] : null, DownloadService.isPlaylistUrl(url));
             String last = "";
             long deadline = System.currentTimeMillis() + 300_000;
+            DownloadJob job = null;
             while (System.currentTimeMillis() < deadline) {
-                DownloadManager.JobSnapshot job = engine.downloads().jobs().stream()
-                        .filter(j -> j.id() == id).findFirst().orElseThrow();
-                String line = job.status() + " total=" + job.totalTracks() + " done=" + job.doneTracks()
-                        + " failed=" + job.failedTracks() + " playlist=" + job.playlistName()
-                        + " title=" + job.title() + " error=" + job.error();
-                if (!line.equals(last)) {
-                    System.out.println(line);
-                    last = line;
-                }
-                if (job.isFinished() || job.doneTracks() >= 1) {
-                    break;
+                job = engine.downloads().getJobs().stream().filter(j -> j.url.equals(url)).findFirst().orElse(null);
+                if (job != null) {
+                    String line = job.status + " " + job.currentIndex + "/" + job.totalCount
+                            + " failed=" + job.failedCount + " playlist=" + job.playlistName
+                            + " title=" + job.title + " error=" + job.error;
+                    if (!line.equals(last)) {
+                        System.out.println(line);
+                        last = line;
+                    }
+                    if (!job.isActive() || job.currentIndex > 1) {
+                        break;
+                    }
                 }
                 Thread.sleep(300);
             }
-            engine.downloads().cancel(id);
+            if (job != null) {
+                engine.downloads().cancel(job.id);
+            }
         }
     }
 }

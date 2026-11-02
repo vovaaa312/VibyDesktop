@@ -20,6 +20,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AccessTime
+import androidx.compose.material.icons.rounded.AudioFile
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.automirrored.rounded.Sort
@@ -48,6 +50,10 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.BoxWithConstraints
 import com.viby.app.model.Playlist
 import com.viby.app.model.SortMode
 import com.viby.app.model.Track
@@ -100,23 +106,18 @@ fun PlaylistScreen(state: AppState, playlistId: String) {
     fun actionTargets(track: Track): List<Track> =
         if (track.id in selection) visible.filter { it.id in selection } else listOf(track)
 
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+    CompositionLocalProvider(LocalCompactPlaylist provides (maxWidth < 600.dp)) {
     ScrollLazyColumn(Modifier.fillMaxSize()) {
         item {
-            Header(
-                playlist,
-                syncToggle = if (state.account.isSignedIn && playlist.canSync) {
-                    {
-                        if (playlist.youtubeSynced) state.account.disableSync(playlist.name)
-                        else state.account.enableSync(playlist.name)
-                    }
-                } else null,
-            )
+            Header(playlist)
         }
         item {
             ActionRow(
                 playing = playingHere && player.isPlaying,
                 onPlay = { if (playingHere) player.togglePlay() else state.playPlaylist(playlist) },
                 onShuffle = { state.playPlaylist(playlist, shuffle = true) },
+                onImport = { state.library.importFiles(playlist.name) },
                 onSync = {
                     val source = playlist.sourceUrl
                     if (source == null) {
@@ -125,10 +126,6 @@ fun PlaylistScreen(state: AppState, playlistId: String) {
                         // re-running the job only downloads tracks that are missing locally
                         state.downloads.enqueue(source, playlist.name) {
                             state.showMessage("Проверяю новые треки в плейлисте YouTube")
-                        }
-                        // two-way sync also sends local additions to YouTube
-                        if (playlist.youtubeSynced && state.account.isSignedIn) {
-                            state.account.pushMissing(playlist.name, quiet = true)
                         }
                     }
                 },
@@ -156,7 +153,6 @@ fun PlaylistScreen(state: AppState, playlistId: String) {
                 header = if (targets.size > 1) "Выбрано: ${tracksLabel(targets.size)}" else track.title,
                 actions = {
                     val ids = targets.map { it.id }.toSet()
-                    val synced = playlist.youtubeSynced && state.account.isSignedIn
                     buildList {
                         add(MenuAction("Воспроизвести") { state.playPlaylist(playlist.copy(tracks = visible), track) })
                         add(MenuAction("Добавить в очередь") { player.enqueue(targets) })
@@ -167,15 +163,15 @@ fun PlaylistScreen(state: AppState, playlistId: String) {
                         val retryable = targets.filter { !it.isDownloaded && it.videoId != null }
                         if (retryable.isNotEmpty()) {
                             add(MenuAction("Повторить загрузку") {
-                                retryable.forEach { state.downloads.retry(it, playlist.name) }
+                                retryable.forEach { state.downloads.retry(it) }
                             })
                         }
-                        add(MenuAction(if (synced) "Удалить из плейлиста и с YouTube" else "Удалить из плейлиста") {
-                            if (synced) state.account.deleteSynced(playlist.name, ids) else state.library.removeTracks(ids)
+                        add(MenuAction("Удалить из плейлиста") {
+                            state.deleteTracks(playlist, targets, deleteFiles = false)
                             selection = emptySet()
                         })
                         add(MenuAction("Удалить с устройства", danger = true) {
-                            state.library.removeTracks(ids, deleteFiles = true)
+                            state.deleteTracks(playlist, targets, deleteFiles = true)
                             selection = emptySet()
                         })
                     }
@@ -195,11 +191,15 @@ fun PlaylistScreen(state: AppState, playlistId: String) {
                             state.playPlaylist(playlist.copy(tracks = visible), track)
                         }
                     },
-                    modifier = Modifier.padding(horizontal = 16.dp),
+                    onTogglePlay = player::togglePlay,
+                    modifier = Modifier.padding(horizontal = if (LocalCompactPlaylist.current) 4.dp else 16.dp),
+                    showAdded = !LocalCompactPlaylist.current,
                 )
             }
         }
         item { Spacer(Modifier.height(32.dp)) }
+    }
+    }
     }
 
     moveDialog?.let { ids ->
@@ -207,75 +207,41 @@ fun PlaylistScreen(state: AppState, playlistId: String) {
             playlists = state.library.playlists.filter { it.id != playlist.id },
             onDismiss = { moveDialog = null },
         ) { target ->
-            val videoIds = playlist.tracks.filter { it.id in ids }.mapNotNull { it.videoId }
-            state.library.copyTracks(ids, target.id) { added ->
-                state.showMessage(
-                    if (added == 0) "Эти треки уже есть в «${target.name}»"
-                    else "${tracksLabel(added)} → «${target.name}»"
-                )
-                // tracks sent to a synced playlist are added to its YouTube copy too
-                if (added > 0 && target.youtubeSynced && state.account.isSignedIn) {
-                    // only the sent videos: never re-add tracks that were removed on YouTube
-                    state.account.pushMissing(target.name, videoIds, quiet = true)
-                }
-            }
+            state.sendTracks(playlist.tracks.filter { it.id in ids }, target)
             selection = emptySet()
         }
     }
 }
 
 @Composable
-private fun Header(playlist: Playlist, syncToggle: (() -> Unit)?) {
+private fun Header(playlist: Playlist) {
     val (top, _) = coverColors(playlist.id)
+    val compact = LocalCompactPlaylist.current
     Row(
         Modifier
             .fillMaxWidth()
             .background(Brush.verticalGradient(listOf(top.copy(alpha = 0.75f), top.copy(alpha = 0.25f))))
-            .padding(start = 32.dp, end = 32.dp, top = 56.dp, bottom = 24.dp),
+            .padding(start = if (compact) 16.dp else 32.dp, end = if (compact) 16.dp else 32.dp,
+                top = 56.dp, bottom = if (compact) 16.dp else 24.dp),
         verticalAlignment = Alignment.Bottom,
     ) {
-        CoverArt(playlist.id, 200.dp, corner = 6.dp, imageUrl = playlist.coverUrl)
-        Spacer(Modifier.width(24.dp))
+        CoverArt(playlist.id, if (compact) 120.dp else 200.dp, corner = 6.dp, imageUrl = playlist.coverUrl)
+        Spacer(Modifier.width(if (compact) 16.dp else 24.dp))
         Column {
             Text("Плейлист", style = MaterialTheme.typography.bodySmall, color = VibyColors.TextPrimary)
             Text(
                 playlist.name,
-                style = MaterialTheme.typography.displaySmall,
+                style = if (compact) MaterialTheme.typography.headlineMedium else MaterialTheme.typography.displaySmall,
                 color = VibyColors.TextPrimary,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(vertical = 8.dp),
             )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (playlist.youtubeSynced) {
-                    Icon(Icons.Rounded.Sync, null, tint = VibyColors.TextPrimary, modifier = Modifier.size(16.dp))
-                    Text(" Синхронизирован с YouTube • ", style = MaterialTheme.typography.bodyMedium,
-                        color = VibyColors.TextPrimary)
-                }
-                Text(
-                    "${tracksLabel(playlist.tracks.size)}, ${totalDuration(playlist.durationMs)}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = VibyColors.TextSecondary,
-                )
-            }
-            if (syncToggle != null) {
-                Spacer(Modifier.height(10.dp))
-                Row(
-                    Modifier.clip(RoundedCornerShape(16.dp)).background(Color.Black.copy(alpha = 0.35f))
-                        .clickable(onClick = syncToggle).padding(start = 12.dp, end = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("Синхронизация с YouTube", style = MaterialTheme.typography.bodyMedium,
-                        color = VibyColors.TextPrimary)
-                    Spacer(Modifier.width(8.dp))
-                    Switch(
-                        checked = playlist.youtubeSynced,
-                        onCheckedChange = { syncToggle() },
-                        colors = SwitchDefaults.colors(checkedTrackColor = VibyColors.Accent),
-                        modifier = Modifier.scale(0.75f),
-                    )
-                }
-            }
+            Text(
+                "${tracksLabel(playlist.tracks.size)}, ${totalDuration(playlist.durationMs)}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = VibyColors.TextSecondary,
+            )
         }
     }
 }
@@ -286,33 +252,43 @@ private fun ActionRow(
     onPlay: () -> Unit,
     onShuffle: () -> Unit,
     onSync: () -> Unit,
+    onImport: () -> Unit,
     query: String,
     onQuery: (String) -> Unit,
     sort: SortMode,
     onSort: (SortMode) -> Unit,
 ) {
+    val compact = LocalCompactPlaylist.current
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 20.dp),
+        Modifier.fillMaxWidth().padding(horizontal = if (compact) 16.dp else 32.dp, vertical = 20.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 16.dp),
     ) {
-        PlayButton(playing, onPlay)
+        PlayButton(playing, onPlay, size = if (compact) 48.dp else 56.dp)
         IconAction(Icons.Rounded.Shuffle, "Перемешать", onShuffle, size = 40.dp, iconSize = 28.dp)
         IconAction(Icons.Rounded.Sync, "Обновить из YouTube", onSync, size = 40.dp, iconSize = 26.dp)
-        Spacer(Modifier.weight(1f))
-        SearchField(query, onQuery)
-        SortMenu(sort, onSort)
+        IconAction(Icons.Rounded.AudioFile, "Добавить файлы с компьютера", onImport, size = 40.dp, iconSize = 24.dp)
+        // the search box shrinks before anything else when the column gets narrow
+        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+            SearchField(query, onQuery, modifier = Modifier.widthIn(max = 240.dp).fillMaxWidth())
+        }
+        SortMenu(sort, onSort, showLabel = !compact)
     }
 }
 
 @Composable
-fun SearchField(query: String, onQuery: (String) -> Unit, placeholder: String = "Поиск в плейлисте") {
+fun SearchField(
+    query: String,
+    onQuery: (String) -> Unit,
+    placeholder: String = "Поиск в плейлисте",
+    modifier: Modifier = Modifier.width(240.dp),
+) {
     Row(
-        Modifier
-            .width(240.dp)
+        modifier
+            .height(36.dp)
             .clip(RoundedCornerShape(4.dp))
             .background(VibyColors.Highlight)
-            .padding(horizontal = 10.dp, vertical = 8.dp),
+            .padding(start = 10.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(Icons.Rounded.Search, null, tint = VibyColors.TextSecondary, modifier = Modifier.size(18.dp))
@@ -330,19 +306,27 @@ fun SearchField(query: String, onQuery: (String) -> Unit, placeholder: String = 
                 modifier = Modifier.fillMaxWidth(),
             )
         }
+        if (query.isNotEmpty()) {
+            IconAction(Icons.Rounded.Close, "Очистить поиск", { onQuery("") }, size = 28.dp, iconSize = 16.dp)
+        } else {
+            Spacer(Modifier.width(28.dp))
+        }
     }
 }
 
 @Composable
-private fun SortMenu(sort: SortMode, onSort: (SortMode) -> Unit) {
+private fun SortMenu(sort: SortMode, onSort: (SortMode) -> Unit, showLabel: Boolean = true) {
     var open by remember { mutableStateOf(false) }
     Box {
         Row(
             Modifier.clip(RoundedCornerShape(4.dp)).clickable { open = true }.padding(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(sort.label, style = MaterialTheme.typography.bodyMedium, color = VibyColors.TextSecondary)
-            Spacer(Modifier.width(6.dp))
+            if (showLabel) {
+                Text(sort.label, style = MaterialTheme.typography.bodyMedium, color = VibyColors.TextSecondary,
+                    maxLines = 1)
+                Spacer(Modifier.width(6.dp))
+            }
             Icon(Icons.AutoMirrored.Rounded.Sort, null, tint = VibyColors.TextSecondary, modifier = Modifier.size(18.dp))
         }
         DropdownMenu(open, { open = false }, containerColor = VibyColors.Highlight) {
@@ -360,12 +344,13 @@ private fun SortMenu(sort: SortMode, onSort: (SortMode) -> Unit) {
 
 @Composable
 private fun ColumnsHeader() {
-    Column(Modifier.padding(horizontal = 32.dp)) {
+    val compact = LocalCompactPlaylist.current
+    Column(Modifier.padding(horizontal = if (compact) 4.dp else 32.dp)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically) {
             HeaderText("#", Modifier.width(40.dp))
             HeaderText("Название", Modifier.weight(1f).padding(start = 52.dp))
-            HeaderText("Добавлен", Modifier.width(140.dp).padding(start = 16.dp))
+            if (!compact) HeaderText("Добавлен", Modifier.width(140.dp).padding(start = 16.dp))
             Box(Modifier.width(56.dp), contentAlignment = Alignment.CenterEnd) {
                 Icon(Icons.Rounded.AccessTime, "Длительность", tint = VibyColors.TextSecondary,
                     modifier = Modifier.size(16.dp))
@@ -405,6 +390,9 @@ private fun MoveDialog(playlists: List<Playlist>, onDismiss: () -> Unit, onMove:
         confirmButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
     )
 }
+
+/** True when the playlist column is narrow (small window or side panel open). */
+private val LocalCompactPlaylist = compositionLocalOf { false }
 
 private fun totalDuration(ms: Long): String {
     val duration = ms.milliseconds

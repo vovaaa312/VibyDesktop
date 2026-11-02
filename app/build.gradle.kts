@@ -62,6 +62,32 @@ compose.desktop {
     }
 }
 
+// `run` loads classes lazily straight from the build output, so a rebuild while the app is open
+// swaps them under the running JVM (NoClassDefFoundError on the next new class). Launch from a
+// private copy of the classpath instead; copies of earlier runs are removed once unlocked.
+// Compose registers `run` after evaluation, hence the lazy lookup
+tasks.withType<JavaExec>().matching { it.name == "run" }.configureEach {
+    val snapshots = layout.buildDirectory.dir("run-classpath").get().asFile
+    val noClasspath = files()
+    doFirst {
+        // Windows refuses to rename a folder whose jars a running instance holds open
+        snapshots.listFiles()?.forEach { old ->
+            val doomed = File(snapshots, "${old.name}.old")
+            if (old.renameTo(doomed)) doomed.deleteRecursively()
+        }
+        val target = File(snapshots, System.currentTimeMillis().toString())
+        val entries = classpath.files.filter { it.exists() }.mapIndexed { index, source ->
+            val copy = File(target, "$index-${source.name}")
+            source.copyRecursively(copy, overwrite = true)
+            copy.absolutePath
+        }
+        val argFile = File(target, "classpath.args")
+        argFile.writeText("-cp \"" + entries.joinToString(File.pathSeparator).replace("\\", "\\\\") + "\"")
+        classpath = noClasspath
+        jvmArgs("@${argFile.absolutePath}")
+    }
+}
+
 tasks.register<JavaExec>("renderScreens") {
     group = "verification"
     description = "Downloads a video through the real engine and renders the screens into build/screens."
@@ -84,4 +110,13 @@ tasks.register<JavaExec>("devMediaKeys") {
     group = "verification"
     classpath = sourceSets["test"].runtimeClasspath
     mainClass = "com.viby.app.DevMediaKeysKt"
+}
+
+tasks.register<JavaExec>("renderLayouts") {
+    group = "verification"
+    description = "Renders the main layout at several window sizes into build/screens."
+    classpath = sourceSets["test"].runtimeClasspath
+    mainClass = "com.viby.app.RenderLayoutsKt"
+    args(layout.buildDirectory.dir("screens").get().asFile.absolutePath)
+    systemProperty("viby.home", rootProject.file("core/build/dev-home").absolutePath)
 }

@@ -53,15 +53,34 @@ import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.BoxWithConstraints
 import com.viby.app.model.Playlist
 import com.viby.app.state.AppState
 import com.viby.app.state.Screen
 import com.viby.app.theme.VibyColors
 
+/** True in short windows: tighter navigation and an icon row instead of the bottom menu. */
+private val LocalCompactSidebar = compositionLocalOf { false }
+
 @Composable
-fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
+fun Sidebar(state: AppState, modifier: Modifier = Modifier, width: Dp = 300.dp) {
+    BoxWithConstraints(modifier.width(width).fillMaxHeight()) {
+        // below this height the playlist list would shrink to a couple of rows
+        CompositionLocalProvider(LocalCompactSidebar provides (maxHeight < 720.dp)) {
+            SidebarContent(state)
+        }
+    }
+}
+
+@Composable
+private fun SidebarContent(state: AppState) {
     var dialog by remember { mutableStateOf<PlaylistDialog?>(null) }
-    Column(modifier.width(300.dp).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    val compact = LocalCompactSidebar.current
+    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Panel(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(vertical = 8.dp)) {
                 NavItem(Icons.Rounded.Home, "Главная", state.screen == Screen.Home) { state.navigate(Screen.Home) }
@@ -98,7 +117,8 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
                                 add(MenuAction("Воспроизвести") { state.playPlaylist(playlist) })
                                 add(MenuAction("Перемешать") { state.playPlaylist(playlist, shuffle = true) })
                                 add(MenuAction("Переименовать") { dialog = PlaylistDialog.Rename(playlist) })
-                                if (state.account.isSignedIn && !playlist.youtubeSynced) {
+                                add(MenuAction("Добавить файлы с компьютера…") { state.library.importFiles(playlist.name) })
+                                if (state.account.isSignedIn && !playlist.canSync) {
                                     add(MenuAction("Сохранить на YouTube") { state.account.saveToYoutube(playlist.name) })
                                 }
                                 add(MenuAction("Удалить", danger = true) { dialog = PlaylistDialog.Delete(playlist) })
@@ -115,13 +135,17 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
             }
         }
         Panel(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(vertical = 4.dp)) {
-                UpdateItem(state)
-                NavItem(Icons.Rounded.GraphicEq, "Эквалайзер", state.screen == Screen.Equalizer) {
-                    state.navigate(Screen.Equalizer)
-                }
-                NavItem(Icons.Rounded.Settings, "Настройки", state.screen == Screen.Settings) {
-                    state.navigate(Screen.Settings)
+            if (compact) {
+                CompactBottomBar(state)
+            } else {
+                Column(Modifier.padding(vertical = 4.dp)) {
+                    UpdateItem(state)
+                    NavItem(Icons.Rounded.GraphicEq, "Эквалайзер", state.screen == Screen.Equalizer) {
+                        state.navigate(Screen.Equalizer)
+                    }
+                    NavItem(Icons.Rounded.Settings, "Настройки", state.screen == Screen.Settings) {
+                        state.navigate(Screen.Settings)
+                    }
                 }
             }
         }
@@ -153,6 +177,43 @@ fun Sidebar(state: AppState, modifier: Modifier = Modifier) {
             dismissButton = { TextButton(onClick = { dialog = null }) { Text("Отмена") } },
         )
         null -> Unit
+    }
+}
+
+/** Short windows: updates, equalizer and settings as one row of icons. */
+@Composable
+private fun CompactBottomBar(state: AppState) {
+    val updates = state.updates
+    val update = updates.available
+    val progress = updates.downloadProgress
+    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconAction(
+                Icons.Rounded.SystemUpdateAlt,
+                when {
+                    update != null -> "Обновить до ${update.version()}"
+                    else -> "Проверить обновления (Viby ${updates.version})"
+                },
+                { if (update != null) updates.prompt = true else updates.checkNow() },
+                size = 40.dp, iconSize = 24.dp, active = update != null,
+            )
+            IconAction(Icons.Rounded.GraphicEq, "Эквалайзер", { state.navigate(Screen.Equalizer) },
+                size = 40.dp, iconSize = 24.dp, active = state.screen == Screen.Equalizer)
+            IconAction(Icons.Rounded.Settings, "Настройки", { state.navigate(Screen.Settings) },
+                size = 40.dp, iconSize = 24.dp, active = state.screen == Screen.Settings)
+        }
+        if (progress != null) {
+            LinearProgressIndicator(
+                progress = { progress },
+                color = VibyColors.Accent,
+                trackColor = VibyColors.Highlight,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).height(3.dp),
+            )
+        }
     }
 }
 
@@ -245,12 +306,13 @@ private fun NavItem(
             .hoverable(interaction)
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
             .pointerHoverIcon(PointerIcon.Hand)
-            .padding(horizontal = 20.dp, vertical = 10.dp),
+            .padding(horizontal = 20.dp, vertical = if (LocalCompactSidebar.current) 6.dp else 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, null, tint = color, modifier = Modifier.size(24.dp))
         Spacer(Modifier.width(16.dp))
-        Text(label, style = MaterialTheme.typography.titleMedium, color = color, modifier = Modifier.weight(1f))
+        Text(label, style = MaterialTheme.typography.titleMedium, color = color, modifier = Modifier.weight(1f),
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
         if (badge != null) {
             Box(
                 Modifier.clip(CircleShape).background(VibyColors.Accent).padding(horizontal = 7.dp, vertical = 2.dp),
@@ -290,8 +352,8 @@ private fun PlaylistItem(playlist: Playlist, selected: Boolean, playing: Boolean
                 overflow = TextOverflow.Ellipsis,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (playlist.youtubeSynced) {
-                    Icon(Icons.Rounded.Sync, "Синхронизирован с YouTube",
+                if (playlist.canSync) {
+                    Icon(Icons.Rounded.Sync, "Связан с плейлистом YouTube",
                         tint = VibyColors.AccentBright, modifier = Modifier.size(14.dp))
                     Spacer(Modifier.width(4.dp))
                 }

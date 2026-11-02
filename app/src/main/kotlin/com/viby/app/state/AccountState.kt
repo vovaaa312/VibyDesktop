@@ -81,41 +81,33 @@ class AccountState(private val app: AppState) {
         app.scope.launch { app.showMessage("«$playlistName» сохранён на YouTube как приватный плейлист") }
     }
 
-    fun enableSync(playlistName: String) = task {
-        val result = account.enableSync(playlistName)
+    /** Android addTrack: [onDone] learns whether the video still had to be downloaded. */
+    fun addTrackAtStart(playlistName: String, url: String, onDone: (queued: Boolean) -> Unit) = task {
+        val result = account.addTrackAtStart(playlistName, url)
         app.scope.launch {
-            app.showMessage("Синхронизация с «${result.remoteTitle}» включена, связано треков: ${result.linkedTracks}")
+            app.showMessage("Добавлено в Viby и YouTube")
+            if (result.downloadRequired) app.downloads.enqueue(url, playlistName) { onDone(true) } else onDone(false)
         }
     }
 
-    fun disableSync(playlistName: String) = task {
-        account.disableSync(playlistName)
-        app.scope.launch { app.showMessage("Синхронизация с YouTube выключена") }
-    }
-
-    /** Sends local additions to YouTube; remote additions are pulled by re-downloading the source. */
-    /**
-     * @param videoIds videos to send; null sends tracks added locally and never seen on YouTube
-     */
-    fun pushMissing(playlistName: String, videoIds: List<String>? = null, quiet: Boolean = false) = task {
-        val result = account.pushMissing(playlistName, videoIds)
+    /** Android syncCopiedTracks: sends the copied videos to the target's YouTube playlist. */
+    fun copyToYoutube(playlistName: String, videoIds: List<String>) = task {
+        val result = account.copyToYoutube(playlistName, videoIds)
         app.scope.launch {
-            when {
-                result == null -> if (!quiet) app.showMessage("Новых локальных треков для YouTube нет")
-                result.failedCount > 0 -> app.showMessage(
-                    "На YouTube добавлено ${result.addedCount}, ошибок: ${result.failedCount} (${result.firstError})")
-                result.addedCount > 0 -> app.showMessage("На YouTube добавлено треков: ${result.addedCount}")
-                !quiet -> app.showMessage("Плейлист на YouTube уже совпадает с локальным")
-            }
+            app.showMessage(
+                if (result.failedCount == 0) "Добавлено на YouTube: ${result.addedCount}"
+                else "Добавлено: ${result.addedCount} · ошибок: ${result.failedCount} (${result.firstError})"
+            )
         }
     }
 
-    fun deleteSynced(playlistName: String, trackIds: Set<String>) = task {
-        val result = account.deleteSynced(playlistName, trackIds.map(String::toLong))
-        if (result.failedCount > 0) {
-            app.scope.launch {
-                app.showMessage("Не удалось удалить с YouTube: ${result.failedCount} (${result.firstError})")
-            }
+    fun deleteSynced(playlistName: String, trackIds: Set<String>, deleteFiles: Boolean) = task {
+        val result = account.deleteSynced(playlistName, trackIds.map(String::toLong), deleteFiles)
+        app.scope.launch {
+            app.showMessage(
+                if (result.failedCount == 0) "Удалено: ${result.removed.size}"
+                else "Удалено: ${result.removed.size} · ошибок: ${result.failedCount} (${result.firstError})"
+            )
         }
     }
 

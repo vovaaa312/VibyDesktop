@@ -22,4 +22,7 @@ public class PendingDownload {
     public boolean paused;
 
     public String trackOrderJson;
+
+    /** Desktop: pre-resolved playlist entries (YouTube Data API), null when yt-dlp resolves. */
+    public String entriesJson;
 }

@@ -146,8 +146,7 @@ class YoutubePlaylistSyncTest {
 
         assertEquals(0, linked);
         assertNull(track.youtubePlaylistItemId);
-        // desktop keeps the stale position so automatic pushes never re-add a removed video
-        assertEquals(9, track.youtubePosition);
+        assertNull(track.youtubePosition);
     }
 
     @Test
@@ -181,6 +180,39 @@ class YoutubePlaylistSyncTest {
         assertEquals(0, tracks.get(0).position);
         assertEquals(1, tracks.get(1).id);
         assertEquals(1, tracks.get(1).position);
+    }
+
+    /** The send-to-playlist bug: a lagging list must not push the new track to the bottom. */
+    @Test
+    void insertedItemMissingFromLaggingListStaysWhereItWasInserted() {
+        Track sent = track(3, "sent", 0);
+        Track first = track(1, "first", 1);
+        Track second = track(2, "second", 2);
+        List<Track> tracks = new ArrayList<>(Arrays.asList(sent, first, second));
+        List<YoutubePlaylistApi.PlaylistItem> lagging = Arrays.asList(
+                item("first-item", "first", 0), item("second-item", "second", 1));
+
+        YoutubePlaylistSync.linkTracks(tracks, YoutubePlaylistSync.withInserted(
+                lagging, List.of(item("sent-item", "sent", 0))), true);
+
+        assertEquals(Arrays.asList(sent, first, second), tracks);
+        assertEquals("sent-item", sent.youtubePlaylistItemId);
+        assertEquals(Integer.valueOf(0), sent.youtubePosition);
+        assertEquals(Integer.valueOf(1), first.youtubePosition);
+        assertEquals(Integer.valueOf(2), second.youtubePosition);
+        assertEquals(0, sent.position);
+    }
+
+    @Test
+    void insertedItemAlreadyListedIsNotDuplicated() {
+        List<YoutubePlaylistApi.PlaylistItem> listed = Arrays.asList(
+                item("sent-item", "sent", 0), item("first-item", "first", 1));
+
+        List<YoutubePlaylistApi.PlaylistItem> merged = YoutubePlaylistSync.withInserted(
+                listed, List.of(item("sent-item", "sent", 0)));
+
+        assertEquals(2, merged.size());
+        assertEquals(1, merged.get(1).position);
     }
 
     private static Track track(long id, String videoId, int position) {

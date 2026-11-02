@@ -12,6 +12,7 @@ data class Track(
     val thumbnailUrl: String? = null,
     val filePath: String? = null,
     val videoId: String? = null,
+    val playlistName: String = "",
     val sourceUrl: String? = null,
     val youtubePosition: Int? = null,
     /** User-safe failure text when the download failed. */
@@ -26,7 +27,6 @@ data class Playlist(
     val tracks: List<Track>,
     val sourceUrl: String? = null,
     val coverUrl: String? = null,
-    val youtubeSynced: Boolean = false,
     /** Owned or imported YouTube playlist this one can sync with (radio mixes excluded). */
     val youtubePlaylistId: String? = null,
 ) {

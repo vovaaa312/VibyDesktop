@@ -15,7 +15,7 @@ import java.util.concurrent.Executors;
  */
 public final class Database implements AutoCloseable {
 
-    static final int VERSION = 1;
+    static final int VERSION = 2;
 
     /** Single writer thread, like VibyDatabase.dbExecutor on Android. */
     public final ExecutorService executor = Executors.newSingleThreadExecutor(runnable -> {
@@ -88,6 +88,10 @@ public final class Database implements AutoCloseable {
             if (version < 1) {
                 createV1(statement);
             }
+            if (version < 2) {
+                // desktop: video lists of API-resolved (private) playlists, see DownloadService.enqueueVideos
+                statement.execute("ALTER TABLE `pending_downloads` ADD COLUMN `entriesJson` TEXT");
+            }
             statement.execute("PRAGMA user_version = " + VERSION);
         }
     }
@@ -143,7 +147,18 @@ public final class Database implements AutoCloseable {
 
     @Override
     public void close() throws SQLException {
-        executor.shutdownNow();
+        // let queued writes (queue state, placeholder cleanup) finish before the connection goes away
+        executor.shutdown();
+        try {
+            if (!executor.awaitTermination(2, java.util.concurrent.TimeUnit.SECONDS)) {
+                // drops the queued writes; the one already running must still finish first
+                executor.shutdownNow();
+                executor.awaitTermination(1, java.util.concurrent.TimeUnit.SECONDS);
+            }
+        } catch (InterruptedException e) {
+            executor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
         synchronized (connection) {
             connection.close();
         }

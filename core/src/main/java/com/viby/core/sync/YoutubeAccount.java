@@ -4,7 +4,7 @@ import com.viby.core.data.Database;
 import com.viby.core.data.LibraryRepository;
 import com.viby.core.data.PlaylistSource;
 import com.viby.core.data.Track;
-import com.viby.core.download.DownloadManager;
+import com.viby.core.download.DownloadService;
 
 import org.jspecify.annotations.Nullable;
 
@@ -27,12 +27,12 @@ public final class YoutubeAccount {
     private final GoogleOAuth oauth;
     private final YoutubePlaylistApi api = new YoutubePlaylistApi();
     private final LibraryRepository library;
-    private final DownloadManager downloads;
+    private final DownloadService downloads;
     private final YoutubePlaylistSync sync;
     private volatile YoutubePlaylistApi.@Nullable Channel channel;
 
     public YoutubeAccount(GoogleOAuth oauth, Database database, LibraryRepository library,
-                          DownloadManager downloads) {
+                          DownloadService downloads) {
         this.oauth = oauth;
         this.library = library;
         this.downloads = downloads;
@@ -40,67 +40,50 @@ public final class YoutubeAccount {
     }
 
     /**
-     * Links local tracks to the owned YouTube playlist, turns on two-way sync and sends tracks
-     * that were added locally (e.g. "send to playlist") to YouTube at their local positions.
+     * Android YoutubeSyncController.addTrack: puts the video at the top of the original YouTube
+     * playlist and of the local one; the caller downloads it when the result asks for it.
      */
-    public YoutubePlaylistSync.EnableResult enableSync(String playlistName) throws Exception {
-        List<String> additions = localAdditions(playlistName);
+    public YoutubePlaylistSync.AddResult addTrackAtStart(String playlistName, String url) throws Exception {
         try {
-            YoutubePlaylistSync.EnableResult result = sync.enable(playlistName, oauth.accessToken());
-            if (!additions.isEmpty()) {
-                sync.syncMissingTracks(playlistName, additions, oauth.accessToken());
-            }
-            return result;
+            ensureLinked(playlistName);
+            return sync.addTrackAtStart(playlistName, url, oauth.accessToken());
+        } finally {
+            library.notifyChanged();
+        }
+    }
+
+    /** Android syncCopiedTracks: tracks sent to the playlist are added to its YouTube original too. */
+    public YoutubePlaylistSync.MissingTracksResult copyToYoutube(String playlistName, List<String> videoIds)
+            throws Exception {
+        try {
+            ensureLinked(playlistName);
+            return sync.syncMissingTracks(playlistName, videoIds, oauth.accessToken());
+        } finally {
+            library.notifyChanged();
+        }
+    }
+
+    /** Android deleteFromYoutube: removes tracks locally and from the YouTube original. */
+    public YoutubePlaylistSync.DeleteResult deleteSynced(String playlistName, List<Long> trackIds,
+                                                         boolean deleteFiles) throws Exception {
+        try {
+            ensureLinked(playlistName);
+            List<Track> selected = library.tracks(playlistName).stream()
+                    .filter(track -> trackIds.contains(track.id)).toList();
+            return sync.deleteTracks(playlistName, selected, deleteFiles, oauth.accessToken());
         } finally {
             library.notifyChanged();
         }
     }
 
     /**
-     * Video ids added locally and never seen on YouTube. Tracks that came from the YouTube
-     * playlist and were later removed there are not included, so they are not re-added.
+     * Desktop has no sync switch: choosing "В Viby и YouTube" links the playlist to its owned
+     * YouTube original on first use (Android's syncCopiedTracks enableFirst).
      */
-    public List<String> localAdditions(String playlistName) {
-        return library.tracks(playlistName).stream()
-                .filter(track -> track.videoId != null && !track.videoId.isEmpty()
-                        && track.youtubePlaylistItemId == null && track.youtubePosition == null)
-                .map(track -> track.videoId)
-                .toList();
-    }
-
-    public void disableSync(String playlistName) {
-        sync.disable(playlistName);
-        library.notifyChanged();
-    }
-
-    /**
-     * Sends the given videos (default: {@link #localAdditions}) to the synced YouTube playlist.
-     *
-     * @return null when there was nothing to send
-     */
-    public YoutubePlaylistSync.@Nullable MissingTracksResult pushMissing(String playlistName,
-                                                                          @Nullable List<String> videoIds)
-            throws Exception {
-        List<String> requested = videoIds != null ? videoIds : localAdditions(playlistName);
-        if (requested.isEmpty()) {
-            return null;
-        }
-        try {
-            return sync.syncMissingTracks(playlistName, requested, oauth.accessToken());
-        } finally {
-            library.notifyChanged();
-        }
-    }
-
-    /** Removes tracks locally and from the synced YouTube playlist. */
-    public YoutubePlaylistSync.DeleteResult deleteSynced(String playlistName, List<Long> trackIds)
-            throws Exception {
-        List<Track> selected = library.tracks(playlistName).stream()
-                .filter(track -> trackIds.contains(track.id)).toList();
-        try {
-            return sync.deleteTracks(playlistName, selected, true, oauth.accessToken());
-        } finally {
-            library.notifyChanged();
+    private void ensureLinked(String playlistName) throws Exception {
+        PlaylistSource source = library.source(playlistName);
+        if (source != null && !source.youtubeSyncEnabled) {
+            sync.enable(playlistName, oauth.accessToken());
         }
     }
 
@@ -139,7 +122,7 @@ public final class YoutubeAccount {
      * Lists the playlist through the API (works for private playlists without browser
      * cookies) and queues its videos into {@code playlistName}.
      */
-    public long download(YoutubePlaylistApi.AccountPlaylist playlist, String playlistName) throws Exception {
+    public void download(YoutubePlaylistApi.AccountPlaylist playlist, String playlistName) throws Exception {
         String token = oauth.accessToken();
         List<YoutubePlaylistApi.PlaylistVideo> videos = api.playlistVideos(token, playlist.id());
         if (videos.isEmpty()) {
@@ -147,12 +130,12 @@ public final class YoutubeAccount {
         }
         Map<String, Long> durations = api.durations(token,
                 videos.stream().map(YoutubePlaylistApi.PlaylistVideo::videoId).toList());
-        List<DownloadManager.VideoEntry> entries = new ArrayList<>();
+        List<DownloadService.VideoEntry> entries = new ArrayList<>();
         for (YoutubePlaylistApi.PlaylistVideo video : videos) {
-            entries.add(new DownloadManager.VideoEntry(video.videoId(), video.title(), video.channel(),
+            entries.add(new DownloadService.VideoEntry(video.videoId(), video.title(), video.channel(),
                     durations.getOrDefault(video.videoId(), 0L)));
         }
-        return downloads.enqueueVideos("https://www.youtube.com/playlist?list=" + playlist.id(),
+        downloads.enqueueVideos("https://www.youtube.com/playlist?list=" + playlist.id(),
                 playlistName, playlist.title(), entries);
     }
 
@@ -197,7 +180,8 @@ public final class YoutubeAccount {
         source.updatedAt = System.currentTimeMillis();
         library.saveSource(source);
         // link the new remote items so later local edits sync both ways
-        enableSync(playlistName);
+        ensureLinked(playlistName);
+        library.notifyChanged();
         return url;
     }
 }

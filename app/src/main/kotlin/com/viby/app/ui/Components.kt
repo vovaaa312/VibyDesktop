@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.DragIndicator
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -29,6 +30,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -190,6 +192,8 @@ fun SeekBar(
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
     var dragFraction by remember { mutableStateOf<Float?>(null) }
+    // the gesture detectors below start once; they must call the latest callback
+    val currentOnSeek by rememberUpdatedState(onSeek)
     val shown = (dragFraction ?: fraction).coerceIn(0f, 1f)
     val active = hovered || dragFraction != null
     Canvas(
@@ -199,20 +203,20 @@ fun SeekBar(
             .hoverable(interaction)
             .pointerHoverIcon(PointerIcon.Hand)
             .pointerInput(Unit) {
-                detectTapGestures { offset -> onSeek(offset.x / size.width) }
+                detectTapGestures { offset -> currentOnSeek(offset.x / size.width) }
             }
             .pointerInput(Unit) {
                 detectDragGestures(
                     onDragStart = {
                         dragFraction = it.x / size.width
-                        if (live) onSeek(it.x / size.width)
+                        if (live) currentOnSeek(it.x / size.width)
                     },
-                    onDragEnd = { dragFraction?.let(onSeek); dragFraction = null },
+                    onDragEnd = { dragFraction?.let(currentOnSeek); dragFraction = null },
                     onDragCancel = { dragFraction = null },
                 ) { change, _ ->
                     val fraction = (change.position.x / size.width).coerceIn(0f, 1f)
                     dragFraction = fraction
-                    if (live) onSeek(fraction)
+                    if (live) currentOnSeek(fraction)
                 }
             },
     ) {
@@ -240,4 +244,27 @@ fun SectionTitle(text: String, modifier: Modifier = Modifier) {
         color = VibyColors.TextPrimary,
         modifier = modifier.padding(bottom = 12.dp),
     )
+}
+
+/** Grip for drag-to-reorder lists; reports vertical drag deltas. */
+@Composable
+fun DragHandle(onDrag: (Float) -> Unit, onDragEnd: () -> Unit) {
+    // the detector starts once per handle: without these a drop would use the list as it was
+    // when the row first appeared (e.g. a track that has started downloading since)
+    val currentOnDrag by rememberUpdatedState(onDrag)
+    val currentOnDragEnd by rememberUpdatedState(onDragEnd)
+    Box(
+        Modifier
+            .size(24.dp)
+            .pointerHoverIcon(PointerIcon.Hand)
+            .pointerInput(Unit) {
+                detectDragGestures(onDragEnd = { currentOnDragEnd() }, onDragCancel = { currentOnDragEnd() }) { change, drag ->
+                    change.consume()
+                    currentOnDrag(drag.y)
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(Icons.Rounded.DragIndicator, "Перетащить", tint = VibyColors.TextMuted, modifier = Modifier.size(20.dp))
+    }
 }

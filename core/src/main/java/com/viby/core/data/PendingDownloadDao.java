@@ -21,10 +21,11 @@ public final class PendingDownloadDao {
         synchronized (connection) {
             try (PreparedStatement statement = connection.prepareStatement(
                     "INSERT INTO `pending_downloads` (`url`, `playlistName`, `isPlaylist`, `createdAt`, "
-                            + "`queuePosition`, `paused`, `trackOrderJson`) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                            + "`queuePosition`, `paused`, `trackOrderJson`, `entriesJson`) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     Statement.RETURN_GENERATED_KEYS)) {
                 TrackDao.setArgs(statement, pending.url, pending.playlistName, pending.isPlaylist,
-                        pending.createdAt, pending.queuePosition, pending.paused, pending.trackOrderJson);
+                        pending.createdAt, pending.queuePosition, pending.paused, pending.trackOrderJson,
+                        pending.entriesJson);
                 statement.executeUpdate();
                 try (ResultSet keys = statement.getGeneratedKeys()) {
                     keys.next();
@@ -51,6 +52,7 @@ public final class PendingDownloadDao {
                     pending.queuePosition = r.getLong("queuePosition");
                     pending.paused = r.getBoolean("paused");
                     pending.trackOrderJson = r.getString("trackOrderJson");
+                    pending.entriesJson = r.getString("entriesJson");
                     result.add(pending);
                 }
                 return result;
@@ -60,6 +62,14 @@ public final class PendingDownloadDao {
 
     public void setPaused(long id, boolean paused) throws SQLException {
         execute("UPDATE `pending_downloads` SET `paused` = ? WHERE `id` = ?", paused, id);
+    }
+
+    public void setQueuePosition(long id, long position) throws SQLException {
+        execute("UPDATE `pending_downloads` SET `queuePosition` = ? WHERE `id` = ?", position, id);
+    }
+
+    public void setTrackOrder(long id, String trackOrderJson) throws SQLException {
+        execute("UPDATE `pending_downloads` SET `trackOrderJson` = ? WHERE `id` = ?", trackOrderJson, id);
     }
 
     public void setPlaylistName(long id, String playlistName) throws SQLException {

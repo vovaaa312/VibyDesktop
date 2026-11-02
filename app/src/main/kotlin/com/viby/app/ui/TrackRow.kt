@@ -18,6 +18,7 @@ import androidx.compose.foundation.onClick
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Equalizer
+import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -57,6 +58,8 @@ fun TrackRow(
     selected: Boolean,
     onClick: (ClickKind) -> Unit,
     onPlay: () -> Unit,
+    /** Pause/resume for the track that is already loaded; the hover button must not restart it. */
+    onTogglePlay: () -> Unit = onPlay,
     modifier: Modifier = Modifier,
     showAdded: Boolean = true,
 ) {
@@ -83,6 +86,11 @@ fun TrackRow(
     ) {
         Box(Modifier.width(32.dp), contentAlignment = Alignment.CenterStart) {
             when {
+                hovered && isCurrent -> IconAction(
+                    if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                    if (isPlaying) "Пауза" else "Продолжить", onTogglePlay, size = 24.dp,
+                    tint = VibyColors.AccentBright,
+                )
                 hovered -> IconAction(Icons.Rounded.PlayArrow, "Играть", onPlay, size = 24.dp,
                     tint = VibyColors.TextPrimary)
                 isCurrent && isPlaying -> Icon(Icons.Rounded.Equalizer, null, tint = VibyColors.AccentBright,

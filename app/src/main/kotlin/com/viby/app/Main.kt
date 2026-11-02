@@ -1,6 +1,7 @@
 package com.viby.app
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -34,6 +35,8 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.draw.shadow
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
@@ -146,8 +149,15 @@ fun main() = application {
 fun App(state: AppState) {
     Box(Modifier.fillMaxSize().background(VibyColors.Background)) {
         Column(Modifier.fillMaxSize().padding(8.dp)) {
-            Row(Modifier.weight(1f)) {
-                Sidebar(state)
+            BoxWithConstraints(Modifier.weight(1f)) {
+            val narrow = maxWidth < 1150.dp
+            val sidebarWidth = if (narrow) 240.dp else 300.dp
+            val sideWidth = if (narrow) 300.dp else 340.dp
+            val panelOpen = state.sidePanel != SidePanel.NONE
+            // too little room for three columns: the side panel floats over the content instead
+            val overlay = panelOpen && maxWidth - sidebarWidth - sideWidth - 16.dp < 560.dp
+            Row(Modifier.fillMaxSize()) {
+                Sidebar(state, width = sidebarWidth)
                 Spacer(Modifier.width(8.dp))
                 Panel(Modifier.weight(1f).fillMaxHeight()) {
                     Box(Modifier.fillMaxSize()) {
@@ -175,16 +185,60 @@ fun App(state: AppState) {
                         }
                     }
                 }
-                if (state.sidePanel != SidePanel.NONE) {
+                if (panelOpen && !overlay) {
                     Spacer(Modifier.width(8.dp))
-                    RightPanel(state)
+                    RightPanel(state, width = sideWidth)
                 }
+            }
+            if (overlay) {
+                RightPanel(
+                    state,
+                    width = sideWidth,
+                    modifier = Modifier.align(Alignment.CenterEnd).shadow(16.dp, RoundedCornerShape(8.dp)),
+                )
+            }
             }
             PlayerBar(state)
         }
         Toast(state, Modifier.align(Alignment.BottomCenter).padding(bottom = 100.dp))
         UpdateDialog(state)
+        PromptDialog(state)
     }
+}
+
+/**
+ * [AppState.ask]: one action is a confirm button (duplicate track), several are a list of
+ * choices like Android's setItems dialogs ("В Viby и YouTube" / "Только в Viby").
+ */
+@Composable
+private fun PromptDialog(state: AppState) {
+    val prompt = state.prompt ?: return
+    val single = prompt.actions.singleOrNull()
+    AlertDialog(
+        onDismissRequest = { state.answer(null) },
+        containerColor = VibyColors.Elevated,
+        title = { Text(prompt.title) },
+        text = {
+            Column {
+                prompt.text?.let { Text(it) }
+                if (single == null) {
+                    prompt.actions.forEach { action ->
+                        Text(
+                            action.label,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = VibyColors.TextPrimary,
+                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp))
+                                .clickable { state.answer(action) }.padding(vertical = 12.dp, horizontal = 4.dp),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (single != null) TextButton(onClick = { state.answer(single) }) { Text(single.label) }
+        },
+        dismissButton = { TextButton(onClick = { state.answer(null) }) { Text("Отмена") } },
+    )
 }
 
 @Composable
@@ -212,7 +266,7 @@ private fun UpdateDialog(state: AppState) {
 private fun EngineBanner(state: AppState) {
     val status = state.engineStatus
     if (status.state() == VibyEngine.State.READY) return
-    Column(Modifier.fillMaxWidth().background(VibyColors.Elevated).padding(horizontal = 24.dp, vertical = 12.dp)) {
+    Column(Modifier.fillMaxWidth().background(VibyColors.Elevated).padding(start = 64.dp, end = 24.dp, top = 12.dp, bottom = 12.dp)) {
         when (status.state()) {
             VibyEngine.State.FAILED -> Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -236,7 +290,8 @@ private fun EngineBanner(state: AppState) {
                     " — ${status.downloadedBytes() shr 20} из ${total shr 20} МБ"
                 } else ""
                 Text(
-                    "Первый запуск: скачиваю $label$sizes. Это нужно один раз, дальше всё работает офлайн.",
+                    if (tool == null) "Подготовка к работе…"
+                    else "Первый запуск: скачиваю $label$sizes. Это нужно один раз, дальше всё работает офлайн.",
                     color = VibyColors.TextPrimary,
                     style = MaterialTheme.typography.bodyMedium,
                 )

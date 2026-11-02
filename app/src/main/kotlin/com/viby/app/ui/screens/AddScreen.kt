@@ -50,7 +50,7 @@ import com.viby.app.ui.ScrollColumn
 import com.viby.app.ui.CoverArt
 import com.viby.app.ui.IconAction
 import com.viby.app.ui.NameDialog
-import com.viby.core.download.DownloadManager
+import com.viby.core.download.DownloadService
 import com.viby.core.util.YoutubeUrlParser
 import java.awt.Toolkit
 import java.awt.datatransfer.DataFlavor
@@ -157,11 +157,13 @@ fun AddScreen(state: AppState) {
             Button(
                 enabled = kind != null && kind != UrlKind.INVALID && state.engine.isReady,
                 onClick = {
-                    state.downloads.enqueue(requestUrl, targetId) {
+                    state.addByUrl(requestUrl, targetId) { queued ->
                         url = ""
                         onlyVideo = false
-                        state.showMessage("Добавлено в очередь загрузок")
-                        state.navigate(Screen.Downloads)
+                        if (queued) {
+                            state.showMessage("Добавлено в очередь загрузок")
+                            state.navigate(Screen.Downloads)
+                        }
                     }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = VibyColors.Accent, contentColor = Color.Black),
@@ -225,7 +227,7 @@ private fun PlaylistPicker(state: AppState, selectedId: String?, kind: UrlKind?,
 }
 
 private fun autoLabel(kind: UrlKind?): String = when (kind) {
-    UrlKind.VIDEO -> "Авто: «${DownloadManager.SINGLES_PLAYLIST}»"
+    UrlKind.VIDEO -> "Авто: «${DownloadService.DEFAULT_PLAYLIST}»"
     else -> "Авто: плейлист с названием из YouTube"
 }
 

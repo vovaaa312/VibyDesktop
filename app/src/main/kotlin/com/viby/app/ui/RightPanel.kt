@@ -40,20 +40,28 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.viby.app.model.Track
 import com.viby.app.state.AppState
 import com.viby.app.state.SidePanel
 import com.viby.app.theme.VibyColors
+import kotlin.math.roundToInt
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.material3.TextButton
 import com.viby.core.auth.CookieSource
 import com.viby.core.lyrics.YoutubeLyricsRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 @Composable
-fun RightPanel(state: AppState, modifier: Modifier = Modifier) {
-    Panel(modifier.width(340.dp).fillMaxHeight()) {
+fun RightPanel(state: AppState, modifier: Modifier = Modifier, width: Dp = 340.dp) {
+    Panel(modifier.width(width).fillMaxHeight()) {
         Column {
             Row(
                 Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 12.dp),
@@ -107,26 +115,70 @@ private fun QueueList(state: AppState) {
         EmptyHint("Очередь пуста", "Запустите плейлист или трек — здесь появится то, что играет дальше.")
         return
     }
-    ScrollLazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 8.dp)) {
-        itemsIndexed(player.queue, key = { index, track -> "$index-${track.id}" }) { index, track ->
-            QueueItem(
-                track = track,
-                current = index == player.index,
-                past = index < player.index,
-                onClick = { player.jumpTo(index) },
-                onRemove = { player.removeFromQueue(index) },
-            )
+    var dragging by remember { mutableStateOf(-1) }
+    var dragOffset by remember { mutableStateOf(0f) }
+    val step = with(LocalDensity.current) { QueueRowHeight.toPx() }
+    Column(Modifier.fillMaxSize()) {
+        if (player.customized || player.shuffle) {
+            Row(
+                Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    if (player.shuffle) "Очередь перемешана" else "Очередь изменена",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = VibyColors.TextMuted,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = state::resetQueue) { Text("Сбросить очередь") }
+            }
+        }
+        ScrollLazyColumn(state = listState, modifier = Modifier.weight(1f).padding(horizontal = 8.dp, vertical = 8.dp)) {
+            itemsIndexed(player.queue, key = { index, track -> "$index-${track.id}" }) { index, track ->
+                QueueItem(
+                    track = track,
+                    current = index == player.index,
+                    past = index < player.index,
+                    onClick = { player.jumpTo(index) },
+                    onRemove = { player.removeFromQueue(index) },
+                    onDrag = { dy ->
+                        dragging = index
+                        dragOffset += dy
+                    },
+                    onDragEnd = {
+                        val to = (index + (dragOffset / step).roundToInt()).coerceIn(0, player.queue.lastIndex)
+                        player.moveInQueue(index, to)
+                        dragging = -1
+                        dragOffset = 0f
+                    },
+                    modifier = Modifier
+                        .zIndex(if (dragging == index) 1f else 0f)
+                        .graphicsLayer { translationY = if (dragging == index) dragOffset else 0f },
+                )
+            }
         }
     }
 }
 
+private val QueueRowHeight = 60.dp
+
 @Composable
-private fun QueueItem(track: Track, current: Boolean, past: Boolean, onClick: () -> Unit, onRemove: () -> Unit) {
+private fun QueueItem(
+    track: Track,
+    current: Boolean,
+    past: Boolean,
+    onClick: () -> Unit,
+    onRemove: () -> Unit,
+    onDrag: (Float) -> Unit,
+    onDragEnd: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
     Row(
-        Modifier
+        modifier
             .fillMaxWidth()
+            .height(QueueRowHeight)
             .clip(RoundedCornerShape(6.dp))
             .background(
                 when {
@@ -137,9 +189,11 @@ private fun QueueItem(track: Track, current: Boolean, past: Boolean, onClick: ()
             )
             .hoverable(interaction)
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
-            .padding(8.dp),
+            .padding(horizontal = 4.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        DragHandle(onDrag, onDragEnd)
+        Spacer(Modifier.width(4.dp))
         CoverArt(track.id, 44.dp, imageUrl = track.thumbnailUrl)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {

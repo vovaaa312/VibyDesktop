@@ -31,14 +31,14 @@ fun main(args: Array<String>): Unit = runBlocking {
     withTimeout(600_000) {
         while (!state.engine.isReady) delay(200)
         withContext(Dispatchers.Main) { state.downloads.enqueue(url, "E2E") }
-        while (state.downloads.jobs.none { it.isFinished }) {
-            state.downloads.jobs.firstOrNull()?.let { println("${it.status()} ${it.currentProgress()}% ${it.title()}") }
+        while (state.downloads.jobs.isEmpty() || state.downloads.jobs.any { it.isActive }) {
+            state.downloads.jobs.firstOrNull()?.let { println("${it.status} ${it.progress}% ${it.title}") }
             delay(1_000)
         }
         delay(1_000)
     }
     val job = state.downloads.jobs.first()
-    println("job: ${job.status()} done=${job.doneTracks()} failed=${job.failedTracks()} error=${job.error()}")
+    println("job: ${job.status} failed=${job.failedCount} error=${job.error}")
     val track = state.library.playlist("E2E")?.tracks?.firstOrNull()
     println("track: ${track?.title} • ${track?.artist} • ${track?.filePath}")
 

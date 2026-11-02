@@ -1,12 +1,13 @@
 package com.viby.app.state
 
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.viby.app.model.RepeatMode
 import com.viby.app.model.Track
 import kotlinx.coroutines.delay
+import org.json.JSONArray
+import org.json.JSONObject
 
 /** Sound output used by [PlayerState]; the app wires it to core's AudioEngine. */
 interface AudioOutput {
@@ -20,21 +21,34 @@ interface AudioOutput {
 }
 
 /**
- * Queue, transport and volume. Loading a track is delegated to [loader] because local files and
- * pending downloads (online streams) are resolved differently.
+ * Playback queue modelled on Media3 like the Android app: [items] keep the list order, a separate
+ * shuffle order is used while shuffle is on, and queue edits follow Android's
+ * PlaybackQueueController (customized queues, insert after current, reset).
+ * Loading audio is delegated to [loader] because local files and online streams differ.
  */
 class PlayerState(private val audio: AudioOutput? = null) {
-    val queue = mutableStateListOf<Track>()
-    var index by mutableStateOf(-1)
+    /** Media items in list order (Media3 window indices). */
+    var items by mutableStateOf<List<Track>>(emptyList())
         private set
+    /** Index into [items] of the current track, -1 when nothing is loaded. */
+    var currentIndex by mutableStateOf(-1)
+        private set
+    private var shuffleOrder by mutableStateOf(IntArray(0))
+
+    /** Playlist whose tracks were loaded (Android loadedPlaylist). */
     var contextPlaylistId by mutableStateOf<String?>(null)
         private set
+    /** Edited by the user: no longer mirrors its playlist (Android queueCustomized). */
+    var customized by mutableStateOf(false)
+        private set
+
     var isPlaying by mutableStateOf(false)
         private set
     /** True while a stream URL is being resolved for a track that is not downloaded yet. */
     var isLoading by mutableStateOf(false)
     var positionMs by mutableStateOf(0L)
     var shuffle by mutableStateOf(false)
+        private set
     var repeat by mutableStateOf(RepeatMode.OFF)
 
     private var volumeState by mutableStateOf(0.8f)
@@ -43,12 +57,16 @@ class PlayerState(private val audio: AudioOutput? = null) {
     /** Starts [track] at a position, optionally paused. Set by AppState. */
     var loader: (track: Track, startMs: Long, paused: Boolean) -> Unit = { _, _, _ -> }
 
+    /** Called after every change worth persisting (Android PlaybackStateStore triggers). */
+    var onStateChanged: () -> Unit = {}
+
     var volume: Float
         get() = volumeState
         set(value) {
             volumeState = value.coerceIn(0f, 1f)
             mutedState = false
             applyVolume()
+            onStateChanged()
         }
 
     var muted: Boolean
@@ -58,27 +76,70 @@ class PlayerState(private val audio: AudioOutput? = null) {
             applyVolume()
         }
 
-    val current: Track? get() = queue.getOrNull(index)
+    val current: Track? get() = items.getOrNull(currentIndex)
+
+    /** Item indices in the order they will play. */
+    private val playbackOrder: IntArray
+        get() = if (shuffle && shuffleOrder.size == items.size) shuffleOrder else IntArray(items.size) { it }
+
+    /** The queue as shown in the side panel: playback order. */
+    val queue: List<Track> get() = playbackOrder.map { items[it] }
+
+    /** Position of the current track in [queue]. */
+    val index: Int get() = playbackOrder.indexOf(currentIndex)
 
     init {
         applyVolume()
     }
 
+    // ---------------------------------------------------------------- loading
+
+    /**
+     * Android PlaybackQueueController.load / playLocalTrack: a track of the queue that is already
+     * loaded for this playlist is just jumped to; otherwise the playlist replaces the queue.
+     */
     fun playQueue(tracks: List<Track>, start: Track, playlistId: String?) {
-        val ordered = if (shuffle) listOf(start) + (tracks - start).shuffled() else tracks
-        queue.clear()
-        queue.addAll(ordered)
-        contextPlaylistId = playlistId
-        jumpTo(queue.indexOf(start))
+        if (playlistId != null && playlistId == contextPlaylistId) {
+            val existing = items.indexOfFirst { it.id == start.id }
+            if (existing >= 0) {
+                playItem(existing)
+                return
+            }
+        }
+        load(tracks, tracks.indexOfFirst { it.id == start.id }.coerceAtLeast(0), playlistId, customized = false)
+        playItem(currentIndex)
     }
 
-    fun jumpTo(newIndex: Int) {
-        if (newIndex !in queue.indices) return
-        index = newIndex
+    /** Android playResolvedStream: a pending track plays among the local ones; the queue is custom. */
+    fun playWithPending(tracks: List<Track>, start: Track, playlistId: String?) {
+        load(tracks, tracks.indexOfFirst { it.id == start.id }.coerceAtLeast(0), playlistId, customized = true)
+        playItem(currentIndex)
+    }
+
+    private fun load(tracks: List<Track>, startIndex: Int, playlistId: String?, customized: Boolean) {
+        items = tracks
+        currentIndex = startIndex
+        contextPlaylistId = playlistId
+        this.customized = customized
+        shuffleOrder = if (shuffle) shuffledStartingAt(startIndex) else IntArray(0)
+    }
+
+    /** Plays the item at [itemIndex] from the start. */
+    private fun playItem(itemIndex: Int) {
+        if (itemIndex !in items.indices) return
+        currentIndex = itemIndex
         positionMs = 0
         isPlaying = true
-        loader(queue[newIndex], 0, false)
+        loader(items[itemIndex], 0, false)
+        onStateChanged()
     }
+
+    /** Jump from the queue panel; [queuePosition] is a position in [queue]. */
+    fun jumpTo(queuePosition: Int) {
+        playbackOrder.getOrNull(queuePosition)?.let(::playItem)
+    }
+
+    // -------------------------------------------------------------- transport
 
     fun togglePlay() {
         val track = current ?: return
@@ -90,24 +151,40 @@ class PlayerState(private val audio: AudioOutput? = null) {
             // nothing loaded yet, e.g. after a restart or a stopped queue
             if (audio?.hasSource == false) loader(track, positionMs, false) else audio?.resume()
         }
+        onStateChanged()
     }
 
+    /** Media3 seekToNext / automatic transition, honouring shuffle and repeat. */
     fun next(auto: Boolean = false) {
-        if (queue.isEmpty()) return
+        if (items.isEmpty()) return
+        if (auto && repeat == RepeatMode.ONE) {
+            playItem(currentIndex)
+            return
+        }
+        val order = playbackOrder
+        val position = order.indexOf(currentIndex)
         when {
-            auto && repeat == RepeatMode.ONE -> jumpTo(index)
-            index + 1 < queue.size -> jumpTo(index + 1)
-            repeat == RepeatMode.ALL -> jumpTo(0)
+            position + 1 < order.size -> playItem(order[position + 1])
+            repeat != RepeatMode.OFF -> playItem(order[0])
             else -> {
                 isPlaying = false
                 positionMs = 0
                 audio?.stop()
+                onStateChanged()
             }
         }
     }
 
+    /** Media3 seekToPrevious: restart after 3 s, otherwise the previous item (wraps with repeat). */
     fun previous() {
-        if (positionMs > 3_000 || index == 0) seekTo(0) else jumpTo(index - 1)
+        val order = playbackOrder
+        val position = order.indexOf(currentIndex)
+        when {
+            positionMs > MAX_SEEK_TO_PREVIOUS_MS || position < 0 -> seekTo(0)
+            position > 0 -> playItem(order[position - 1])
+            repeat != RepeatMode.OFF && order.isNotEmpty() -> playItem(order.last())
+            else -> seekTo(0)
+        }
     }
 
     fun seek(fraction: Float) {
@@ -118,6 +195,7 @@ class PlayerState(private val audio: AudioOutput? = null) {
     private fun seekTo(ms: Long) {
         positionMs = ms
         audio?.seek(ms)
+        onStateChanged()
     }
 
     /** The audio engine reached the end of the current source. */
@@ -132,43 +210,220 @@ class PlayerState(private val audio: AudioOutput? = null) {
 
     fun cycleRepeat() {
         repeat = RepeatMode.entries[(repeat.ordinal + 1) % RepeatMode.entries.size]
+        onStateChanged()
     }
 
+    /** Android PlaybackService: enabling shuffle moves the current item to the start of the order. */
     fun toggleShuffle() {
-        shuffle = !shuffle
-        val track = current ?: return
-        val upcoming = queue.drop(index + 1).let { if (shuffle) it.shuffled() else it }
-        val head = queue.take(index + 1)
-        queue.clear()
-        queue.addAll(head + upcoming)
-        index = queue.indexOf(track)
+        setShuffleEnabled(!shuffle)
     }
 
-    fun enqueueNext(tracks: List<Track>) {
-        if (tracks.isEmpty()) return
-        if (queue.isEmpty()) { playQueue(tracks, tracks.first(), null); return }
-        queue.addAll(index + 1, tracks)
+    fun setShuffleEnabled(enabled: Boolean) {
+        shuffle = enabled
+        shuffleOrder = if (enabled) shuffledStartingAt(currentIndex.coerceAtLeast(0)) else IntArray(0)
+        onStateChanged()
     }
 
+    // ------------------------------------------------------------ queue edits
+
+    /** Android addToQueue: appended to the queue. */
     fun enqueue(tracks: List<Track>) {
         if (tracks.isEmpty()) return
-        if (queue.isEmpty()) { playQueue(tracks, tracks.first(), null); return }
-        queue.addAll(tracks)
+        if (items.isEmpty()) {
+            playQueue(tracks, tracks.first(), null)
+            customized = true
+            return
+        }
+        val start = items.size
+        items = items + tracks
+        if (shuffle) shuffleOrder = shuffleOrder + IntArray(tracks.size) { start + it }
+        customized = true
+        onStateChanged()
     }
 
-    fun removeFromQueue(position: Int) {
-        if (position == index || position !in queue.indices) return
-        queue.removeAt(position)
-        if (position < index) index--
+    /** Android insertAfterCurrent; with shuffle the new items follow the current one in shuffle order. */
+    fun enqueueNext(tracks: List<Track>) {
+        if (tracks.isEmpty()) return
+        if (items.isEmpty()) {
+            playQueue(tracks, tracks.first(), null)
+            customized = true
+            return
+        }
+        if (shuffle) {
+            // Media3 receives the items at the end, then the order is rewritten (PlaybackQueueOrder)
+            val start = items.size
+            items = items + tracks
+            shuffleOrder = moveInsertedRangeAfterCurrent(
+                shuffleOrder + IntArray(tracks.size) { start + it }, currentIndex, start, tracks.size)
+        } else {
+            val at = currentIndex + 1
+            items = items.take(at) + tracks + items.drop(at)
+        }
+        customized = true
+        onStateChanged()
+    }
+
+    /** Removes the item at [queuePosition] (a position in [queue]); the current track stays. */
+    fun removeFromQueue(queuePosition: Int) {
+        val itemIndex = playbackOrder.getOrNull(queuePosition) ?: return
+        if (itemIndex == currentIndex) return
+        items = items.filterIndexed { i, _ -> i != itemIndex }
+        if (itemIndex < currentIndex) currentIndex--
+        if (shuffleOrder.isNotEmpty()) {
+            shuffleOrder = shuffleOrder.filter { it != itemIndex }.map { if (it > itemIndex) it - 1 else it }.toIntArray()
+        }
+        customized = true
+        onStateChanged()
+    }
+
+    /** Drag in the queue panel: reorders the shuffle order while shuffled, the list otherwise. */
+    fun moveInQueue(from: Int, to: Int) {
+        val order = playbackOrder.toMutableList()
+        if (from !in order.indices || to !in order.indices || from == to) return
+        if (shuffle) {
+            order.add(to, order.removeAt(from))
+            shuffleOrder = order.toIntArray()
+        } else {
+            val currentTrack = current
+            val list = items.toMutableList()
+            list.add(to, list.removeAt(from))
+            items = list
+            currentIndex = list.indexOf(currentTrack)
+        }
+        customized = true
+        onStateChanged()
+    }
+
+    /**
+     * Android resetToActivePlaylist: the queue mirrors [tracks] again, the current track keeps its
+     * position when it is still there, and shuffle is turned off.
+     */
+    fun resetTo(tracks: List<Track>, playlistId: String?) {
+        val currentId = current?.id
+        val keep = tracks.indexOfFirst { it.id == currentId }
+        val wasPlaying = isPlaying
+        shuffle = false
+        if (tracks.isEmpty()) {
+            items = emptyList()
+            currentIndex = -1
+            isPlaying = false
+            audio?.stop()
+        } else if (keep >= 0) {
+            load(tracks, keep, playlistId, customized = false)
+        } else {
+            load(tracks, 0, playlistId, customized = false)
+            positionMs = 0
+            loader(tracks[0], 0, !wasPlaying)
+        }
+        contextPlaylistId = playlistId
+        customized = false
+        onStateChanged()
+    }
+
+    /**
+     * Android syncWithActivePlaylist: an unedited queue follows its playlist; newly downloaded
+     * tracks are appended, a different order rebuilds the queue around the current track.
+     */
+    fun syncWithPlaylist(playlistId: String, playable: List<Track>) {
+        if (playlistId != contextPlaylistId || customized || items.isEmpty()) return
+        val prefixMatches = items.size <= playable.size &&
+            items.indices.all { items[it].id == playable[it].id }
+        if (prefixMatches && playable.size > items.size) {
+            val start = items.size
+            val added = playable.size - start
+            items = playable
+            if (shuffle) shuffleOrder = shuffleOrder + IntArray(added) { start + it }
+            onStateChanged()
+        } else if (!prefixMatches) {
+            val currentId = current?.id
+            val newIndex = playable.indexOfFirst { it.id == currentId }
+            if (newIndex < 0) return // the playing track left the playlist: keep playing it
+            items = playable
+            currentIndex = newIndex
+            shuffleOrder = if (shuffle) shuffledStartingAt(newIndex) else IntArray(0)
+            onStateChanged()
+        } else {
+            // same tracks, refreshed metadata (titles, covers)
+            items = playable
+        }
+    }
+
+    /** Android clearIfLoaded: the loaded playlist was deleted. */
+    fun clearIfLoaded(playlistId: String) {
+        if (playlistId != contextPlaylistId) return
+        audio?.stop()
+        items = emptyList()
+        currentIndex = -1
+        isPlaying = false
+        contextPlaylistId = null
+        customized = false
+        onStateChanged()
+    }
+
+    // ------------------------------------------------------------ persistence
+
+    /** Android PlaybackStateStore: queue, current item, position, shuffle order and repeat. */
+    fun saveState(): JSONObject = JSONObject()
+        .put("queue", JSONArray(items.map { it.id }))
+        .put("currentId", current?.id)
+        .put("positionMs", positionMs)
+        .put("shuffle", shuffle)
+        .put("shuffleOrder", JSONArray(shuffleOrder.toList()))
+        .put("repeat", repeat.name)
+        .put("playlist", contextPlaylistId)
+        .put("customized", customized)
+        .put("volume", volumeState.toDouble())
+
+    /**
+     * Restores a saved queue paused at its position. Tracks that no longer exist are dropped and
+     * the shuffle order is remapped, like PlaybackStateStore.restore.
+     */
+    fun restoreState(json: JSONObject, resolve: (String) -> Track?) {
+        volumeState = json.optDouble("volume", 0.8).toFloat().coerceIn(0f, 1f)
+        applyVolume()
+        repeat = runCatching { RepeatMode.valueOf(json.optString("repeat", "OFF")) }.getOrDefault(RepeatMode.OFF)
+        val saved = json.optJSONArray("queue") ?: return
+        val oldToNew = IntArray(saved.length()) { -1 }
+        val restored = mutableListOf<Track>()
+        for (i in 0 until saved.length()) {
+            resolve(saved.optString(i))?.let {
+                oldToNew[i] = restored.size
+                restored += it
+            }
+        }
+        if (restored.isEmpty()) return
+        items = restored
+        val currentId = json.optString("currentId", "")
+        currentIndex = restored.indexOfFirst { it.id == currentId }.takeIf { it >= 0 } ?: 0
+        positionMs = if (restored.getOrNull(currentIndex)?.id == currentId) json.optLong("positionMs", 0) else 0
+        contextPlaylistId = json.optString("playlist", "").ifEmpty { null }
+        customized = json.optBoolean("customized", false)
+        shuffle = json.optBoolean("shuffle", false)
+        val savedOrder = json.optJSONArray("shuffleOrder")
+        val order = (0 until (savedOrder?.length() ?: 0)).mapNotNull { oldToNew.getOrNull(savedOrder!!.optInt(it)) }
+            .filter { it >= 0 }
+        shuffleOrder = when {
+            !shuffle -> IntArray(0)
+            order.size == restored.size -> order.toIntArray()
+            else -> shuffledStartingAt(currentIndex)
+        }
+        isPlaying = false
+        loader(restored[currentIndex], positionMs, true)
     }
 
     /** Mirrors the engine position into Compose state for the seek bar. */
     suspend fun runClock() {
         val output = audio ?: return
+        var sinceSave = 0L
         while (true) {
             delay(TICK_MS)
             if (isPlaying && !isLoading && output.hasSource) {
-                positionMs = output.positionMs.coerceAtMost(current?.durationMs ?: Long.MAX_VALUE)
+                positionMs = output.positionMs.coerceAtMost(current?.durationMs?.takeIf { it > 0 } ?: Long.MAX_VALUE)
+                sinceSave += TICK_MS
+                if (sinceSave >= SAVE_POSITION_MS) {
+                    sinceSave = 0
+                    onStateChanged()
+                }
             }
         }
     }
@@ -177,7 +432,21 @@ class PlayerState(private val audio: AudioOutput? = null) {
         audio?.setVolume(if (mutedState) 0f else volumeState)
     }
 
-    private companion object {
-        const val TICK_MS = 200L
+    private fun shuffledStartingAt(start: Int): IntArray {
+        if (items.isEmpty()) return IntArray(0)
+        val rest = items.indices.filter { it != start }.shuffled()
+        return (listOf(start.coerceIn(items.indices)) + rest).distinct().toIntArray()
+    }
+
+    companion object {
+        private const val TICK_MS = 200L
+        private const val SAVE_POSITION_MS = 5_000L
+        /** Media3 default maxSeekToPreviousPositionMs. */
+        const val MAX_SEEK_TO_PREVIOUS_MS = 3_000L
+
+        /** Port of Android PlaybackQueueOrder.moveInsertedRangeAfterCurrent (core keeps it package-private). */
+        fun moveInsertedRangeAfterCurrent(order: IntArray, currentIndex: Int, rangeStart: Int, rangeCount: Int): IntArray =
+            com.viby.core.playback.PlaybackQueueOrderAccess.moveInsertedRangeAfterCurrent(
+                order, currentIndex, rangeStart, rangeCount)
     }
 }

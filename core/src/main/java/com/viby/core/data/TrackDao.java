@@ -121,6 +121,36 @@ public final class TrackDao {
         }
     }
 
+    /** Android TrackDao.getByVideoIdSync: any row of the video in the playlist. */
+    public @Nullable Track byVideoId(String playlistName, String videoId) throws SQLException {
+        List<Track> tracks = query("SELECT * FROM `tracks` WHERE `playlistName` = ? AND `videoId` = ? LIMIT 1",
+                playlistName, videoId);
+        return tracks.isEmpty() ? null : tracks.get(0);
+    }
+
+    public @Nullable Track downloadedInPlaylist(String playlistName, String videoId) throws SQLException {
+        List<Track> tracks = query("SELECT * FROM `tracks` WHERE `playlistName` = ? AND `videoId` = ? "
+                + "AND `downloaded` = 1 LIMIT 1", playlistName, videoId);
+        return tracks.isEmpty() ? null : tracks.get(0);
+    }
+
+    public @Nullable Track byFilePath(String playlistName, String filePath) throws SQLException {
+        List<Track> tracks = query("SELECT * FROM `tracks` WHERE `playlistName` = ? AND `filePath` = ? LIMIT 1",
+                playlistName, filePath);
+        return tracks.isEmpty() ? null : tracks.get(0);
+    }
+
+    /** Android getDownloadedByVideoIdGloballySync: every completed copy, oldest first. */
+    public List<Track> downloadedByVideoIdOrdered(String videoId) throws SQLException {
+        return query("SELECT * FROM `tracks` WHERE `videoId` = ? AND `downloaded` = 1 ORDER BY `id`", videoId);
+    }
+
+    /** Android deletePending: removes the not yet downloaded placeholder of a video. */
+    public void deletePending(String playlistName, String videoId) throws SQLException {
+        execute("DELETE FROM `tracks` WHERE `playlistName` = ? AND `videoId` = ? AND `downloaded` = 0",
+                playlistName, videoId);
+    }
+
     /** Moves every track of the playlist down by {@code count} to make room at the top. */
     public void shiftPositions(String playlistName, int count) throws SQLException {
         execute("UPDATE `tracks` SET `position` = `position` + ? WHERE `playlistName` = ?", count, playlistName);
