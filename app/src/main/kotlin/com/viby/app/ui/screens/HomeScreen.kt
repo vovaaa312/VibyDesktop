@@ -16,7 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
+import com.viby.app.ui.ScrollLazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -84,7 +84,7 @@ fun HomeScreen(state: AppState) {
         }
         if (filter != HomeFilter.RECENT) {
             Column(Modifier.padding(horizontal = 32.dp)) { SectionTitle("Ваши плейлисты") }
-            LazyRow(
+            ScrollLazyRow(
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 24.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
@@ -194,7 +194,7 @@ private fun Shortcut(state: AppState, playlist: Playlist, modifier: Modifier) {
 /** YouTube Music "Quick picks": a horizontally scrolling grid of four-row track columns. */
 @Composable
 private fun QuickPicks(state: AppState, tracks: List<Track>) {
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+    ScrollLazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         items(tracks.chunked(4)) { column ->
             Column(Modifier.width(320.dp)) {
                 column.forEach { track ->

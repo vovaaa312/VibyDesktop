@@ -3,6 +3,20 @@ package com.viby.app.ui
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.v2.ScrollbarAdapter
 import androidx.compose.foundation.VerticalScrollbar
+import androidx.compose.foundation.HorizontalScrollbar
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.ScrollableState
 import androidx.compose.foundation.gestures.scrollBy
@@ -193,3 +207,63 @@ fun ScrollColumn(
 private const val DEAD_ZONE_PX = 12f
 /** Pixels per second per pixel of distance from the anchor. */
 private const val SPEED = 6f
+
+/**
+ * Horizontal shelf (Spotify / YouTube Music home rows): a scrollbar under the row once it
+ * overflows, and page arrows at the edges on hover. Shift + wheel scrolls it too.
+ */
+@Composable
+fun ScrollLazyRow(
+    modifier: Modifier = Modifier,
+    contentPadding: PaddingValues = PaddingValues(0.dp),
+    horizontalArrangement: Arrangement.Horizontal = Arrangement.Start,
+    content: LazyListScope.() -> Unit,
+) {
+    val state = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    fun page(direction: Int) {
+        val width = state.layoutInfo.viewportSize.width * PAGE_FRACTION
+        scope.launch { state.animateScrollBy(direction * width) }
+    }
+    Column(modifier.hoverable(interaction)) {
+        Box(Modifier.fillMaxWidth()) {
+            LazyRow(Modifier.fillMaxWidth(), state, contentPadding,
+                horizontalArrangement = horizontalArrangement, content = content)
+            if (hovered && state.canScrollBackward) {
+                PageArrow(Icons.AutoMirrored.Rounded.KeyboardArrowLeft, "Назад",
+                    Modifier.align(Alignment.CenterStart).padding(start = 8.dp)) { page(-1) }
+            }
+            if (hovered && state.canScrollForward) {
+                PageArrow(Icons.AutoMirrored.Rounded.KeyboardArrowRight, "Вперёд",
+                    Modifier.align(Alignment.CenterEnd).padding(end = 8.dp)) { page(1) }
+            }
+        }
+        if (state.canScrollBackward || state.canScrollForward) {
+            HorizontalScrollbar(
+                rememberScrollbarAdapter(state),
+                Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 6.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun PageArrow(icon: ImageVector, description: String, modifier: Modifier, onClick: () -> Unit) {
+    Box(
+        modifier
+            .size(36.dp)
+            .shadow(6.dp, CircleShape)
+            .clip(CircleShape)
+            .background(Color.Black.copy(alpha = 0.75f))
+            .clickable(onClick = onClick)
+            .pointerHoverIcon(PointerIcon.Hand),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, description, tint = Color.White, modifier = Modifier.size(24.dp))
+    }
+}
+
+/** Share of the visible width one arrow click scrolls. */
+private const val PAGE_FRACTION = 0.8f

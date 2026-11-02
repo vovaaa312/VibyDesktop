@@ -16,6 +16,15 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.sp
+import com.viby.app.ui.FitTitle
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
@@ -106,16 +115,19 @@ fun PlaylistScreen(state: AppState, playlistId: String) {
     fun actionTargets(track: Track): List<Track> =
         if (track.id in selection) visible.filter { it.id in selection } else listOf(track)
 
+    val listState = remember(playlistId) { LazyListState() }
+    val onPlay = { if (playingHere) player.togglePlay() else state.playPlaylist(playlist) }
+
     BoxWithConstraints(Modifier.fillMaxSize()) {
     CompositionLocalProvider(LocalCompactPlaylist provides (maxWidth < 600.dp)) {
-    ScrollLazyColumn(Modifier.fillMaxSize()) {
-        item {
+    ScrollLazyColumn(Modifier.fillMaxSize(), state = listState) {
+        item(key = HEADER_KEY) {
             Header(playlist)
         }
         item {
             ActionRow(
                 playing = playingHere && player.isPlaying,
-                onPlay = { if (playingHere) player.togglePlay() else state.playPlaylist(playlist) },
+                onPlay = onPlay,
                 onShuffle = { state.playPlaylist(playlist, shuffle = true) },
                 onImport = { state.library.importFiles(playlist.name) },
                 onSync = {
@@ -135,7 +147,7 @@ fun PlaylistScreen(state: AppState, playlistId: String) {
                 onSort = { sort = it },
             )
         }
-        item { ColumnsHeader() }
+        item(key = COLUMNS_KEY) { ColumnsHeader() }
         if (visible.isEmpty()) {
             item {
                 Box(Modifier.fillMaxWidth().height(200.dp)) {
@@ -199,6 +211,7 @@ fun PlaylistScreen(state: AppState, playlistId: String) {
         }
         item { Spacer(Modifier.height(32.dp)) }
     }
+    StickyBar(playlist, listState, playingHere && player.isPlaying, onPlay)
     }
     }
 
@@ -229,12 +242,11 @@ private fun Header(playlist: Playlist) {
         Spacer(Modifier.width(if (compact) 16.dp else 24.dp))
         Column {
             Text("Плейлист", style = MaterialTheme.typography.bodySmall, color = VibyColors.TextPrimary)
-            Text(
+            FitTitle(
                 playlist.name,
-                style = if (compact) MaterialTheme.typography.headlineMedium else MaterialTheme.typography.displaySmall,
-                color = VibyColors.TextPrimary,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.displaySmall,
+                maxSize = 56.sp,
+                minSize = 24.sp,
                 modifier = Modifier.padding(vertical = 8.dp),
             )
             Text(
@@ -400,3 +412,56 @@ private fun totalDuration(ms: Long): String {
     val minutes = duration.inWholeMinutes % 60
     return if (hours > 0) "$hours ч $minutes мин" else "$minutes мин"
 }
+
+/**
+ * Spotify-style bar that takes over once the big header has scrolled away: play button and
+ * playlist name, plus the column titles once the list reaches them.
+ */
+@Composable
+private fun StickyBar(
+    playlist: Playlist,
+    listState: LazyListState,
+    playing: Boolean,
+    onPlay: () -> Unit,
+) {
+    val density = LocalDensity.current
+    val barPx = with(density) { STICKY_BAR_HEIGHT.toPx() }
+    val headerGone by remember(listState) {
+        derivedStateOf {
+            val items = listState.layoutInfo.visibleItemsInfo
+            val header = items.firstOrNull { it.key == HEADER_KEY }
+            // nothing laid out yet means the list is at its top
+            if (header == null) items.isNotEmpty() else header.offset + header.size < barPx
+        }
+    }
+    val columnsStuck by remember(listState) {
+        derivedStateOf {
+            val columns = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == COLUMNS_KEY }
+            if (columns == null) listState.firstVisibleItemIndex > 0 else columns.offset < barPx
+        }
+    }
+    val alpha by animateFloatAsState(if (headerGone) 1f else 0f, tween(180))
+    if (alpha == 0f) return
+    val (top, _) = coverColors(playlist.id)
+    Column(Modifier.fillMaxWidth().graphicsLayer { this.alpha = alpha }) {
+        Row(
+            Modifier.fillMaxWidth().height(STICKY_BAR_HEIGHT)
+                .background(lerp(VibyColors.Panel, top, 0.55f))
+                // leaves room for the back button drawn over the content
+                .padding(start = 60.dp, end = 24.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            PlayButton(playing, onPlay, size = 40.dp)
+            Spacer(Modifier.width(16.dp))
+            Text(playlist.name, style = MaterialTheme.typography.titleLarge, color = VibyColors.TextPrimary,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        if (columnsStuck) {
+            Box(Modifier.fillMaxWidth().background(VibyColors.Panel)) { ColumnsHeader() }
+        }
+    }
+}
+
+private val STICKY_BAR_HEIGHT = 64.dp
+private const val HEADER_KEY = "header"
+private const val COLUMNS_KEY = "columns"

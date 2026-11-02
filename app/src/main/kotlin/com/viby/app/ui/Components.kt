@@ -10,6 +10,7 @@ import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -45,7 +46,12 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import com.viby.app.theme.VibyColors
 import kotlin.math.absoluteValue
@@ -266,5 +272,37 @@ fun DragHandle(onDrag: (Float) -> Unit, onDragEnd: () -> Unit) {
         contentAlignment = Alignment.Center,
     ) {
         Icon(Icons.Rounded.DragIndicator, "Перетащить", tint = VibyColors.TextMuted, modifier = Modifier.size(20.dp))
+    }
+}
+
+/**
+ * Big title that shrinks smoothly with the available width (Spotify playlist header) instead
+ * of jumping between sizes or wrapping: one line from [maxSize] down to [minSize], then up to
+ * two lines at [minSize].
+ */
+@Composable
+fun FitTitle(
+    text: String,
+    style: TextStyle,
+    maxSize: TextUnit,
+    minSize: TextUnit,
+    modifier: Modifier = Modifier,
+    color: Color = VibyColors.TextPrimary,
+) {
+    val measurer = rememberTextMeasurer()
+    BoxWithConstraints(modifier) {
+        val available = constraints.maxWidth
+        val fontSize = remember(text, style, available, maxSize, minSize) {
+            val full = measurer.measure(text, style.copy(fontSize = maxSize), maxLines = 1, softWrap = false).size.width
+            if (full <= available || full == 0) maxSize
+            else (maxSize.value * available / full).coerceAtLeast(minSize.value).sp
+        }
+        Text(
+            text,
+            style = style.copy(fontSize = fontSize, lineHeight = fontSize * 1.1f),
+            color = color,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
