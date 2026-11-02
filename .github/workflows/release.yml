@@ -1,17 +1,27 @@
 name: release
 
-# Push a tag like v1.0.0 to build installers and publish them as a GitHub release. The in-app
-# updater reads the latest release and verifies the SHA-256 digest GitHub reports for each asset.
+# Push a tag like v1.0.0 to build installers for all platforms and publish them as a GitHub
+# release. The in-app updater reads the latest release and verifies the SHA-256 digest GitHub
+# reports for each asset. "Run workflow" adds installers to an existing release: it builds the
+# code of the given tag for the chosen platforms only.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag, e.g. v1.0.1
+        required: true
+      platforms:
+        description: Comma separated - windows, macos, linux
+        default: macos, linux
 
 permissions:
   contents: write
 
 env:
-  # installers to build, comma separated: windows, macos, linux
-  RELEASE_PLATFORMS: windows
+  RELEASE_PLATFORMS: ${{ inputs.platforms || 'windows, macos, linux' }}
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   plan:
@@ -40,6 +50,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -55,5 +67,6 @@ jobs:
       - run: ./gradlew test :app:${{ matrix.task }} --no-daemon
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
           files: ${{ matrix.files }}
           generate_release_notes: true
