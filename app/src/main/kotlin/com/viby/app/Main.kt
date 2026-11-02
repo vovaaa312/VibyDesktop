@@ -147,6 +147,8 @@ fun main() = application {
         },
     ) {
         LaunchedEffect(Unit) { window.minimumSize = Dimension(1000, 640) }
+        // the app background (VibyColors.Background) behind white caption text
+        LaunchedEffect(Unit) { WindowsTitleBar.apply(window, caption = 0x000000, text = 0xFFFFFF) }
         LaunchedEffect(Unit) { state.player.runClock() }
         LaunchedEffect(Unit) {
             val log = state.dirs.logs().resolve("media-keys.log").toFile()
