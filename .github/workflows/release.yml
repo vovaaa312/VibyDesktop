@@ -28,7 +28,19 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.pick.outputs.matrix }}
+      tag: ${{ steps.tag.outputs.tag }}
     steps:
+      # a typed tag may lack the v or carry spaces: "1.0.1 " -> v1.0.1
+      - id: tag
+        shell: bash
+        run: |
+          tag=$(echo "$RELEASE_TAG" | tr -d "[:space:]")
+          [[ "$tag" == v* ]] || tag="v$tag"
+          if ! git ls-remote --exit-code --tags "https://github.com/${{ github.repository }}.git" "refs/tags/$tag" > /dev/null; then
+            echo "::error::Tag $tag does not exist"
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
       - id: pick
         shell: bash
         run: |
@@ -51,7 +63,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ needs.plan.outputs.tag }}
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -67,6 +79,6 @@ jobs:
       - run: ./gradlew test :app:${{ matrix.task }} --no-daemon
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.RELEASE_TAG }}
+          tag_name: ${{ needs.plan.outputs.tag }}
           files: ${{ matrix.files }}
           generate_release_notes: true
