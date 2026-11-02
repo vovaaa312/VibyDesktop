@@ -153,7 +153,7 @@ fun PlayButton(
     onClick: () -> Unit,
     size: Dp = 56.dp,
     background: Color = VibyColors.Accent,
-    iconTint: Color = Color.Black,
+    iconTint: Color = VibyColors.OnAccent,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()

@@ -73,7 +73,7 @@ fun YoutubePlaylistsScreen(state: AppState) {
                 Button(
                     enabled = !account.busy,
                     onClick = account::signIn,
-                    colors = ButtonDefaults.buttonColors(containerColor = VibyColors.Accent, contentColor = Color.Black),
+                    colors = ButtonDefaults.buttonColors(containerColor = VibyColors.Accent, contentColor = VibyColors.OnAccent),
                 ) { Text("Войти через Google") }
             }
             account.playlists?.isEmpty() == true -> EmptyHint("Плейлистов нет", "На канале пока нет своих плейлистов.")
@@ -106,7 +106,7 @@ fun YoutubePlaylistsScreen(state: AppState) {
                             enabled = !account.busy && state.engine.isReady,
                             onClick = { account.download(playlist) },
                             colors = ButtonDefaults.buttonColors(containerColor = VibyColors.Accent,
-                                contentColor = Color.Black),
+                                contentColor = VibyColors.OnAccent),
                         ) { Text(if (local != null) "Докачать" else "Скачать") }
                     }
                 }

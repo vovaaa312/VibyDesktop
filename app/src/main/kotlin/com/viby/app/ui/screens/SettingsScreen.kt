@@ -1,5 +1,9 @@
 package com.viby.app.ui.screens
 
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -31,6 +35,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.viby.app.state.AppState
+import com.viby.app.theme.AccentTheme
 import com.viby.app.theme.VibyColors
 import com.viby.app.ui.ScrollColumn
 import com.viby.app.ui.CoverArt
@@ -61,6 +66,12 @@ fun SettingsScreen(state: AppState) {
     ) {
         Column(Modifier.widthIn(max = 760.dp)) {
             Text("Настройки", style = MaterialTheme.typography.headlineMedium, color = VibyColors.TextPrimary)
+
+            Section("Оформление") {
+                SettingRow("Цветовая тема", "Цвет кнопок, ползунков и выделения") {
+                    ThemePicker(VibyColors.theme, state::setTheme)
+                }
+            }
 
             Section("Библиотека") {
                 SettingRow("Папка с музыкой", musicDir.toString()) {
@@ -207,6 +218,29 @@ private fun SettingRow(title: String, subtitle: String, action: @Composable () -
         }
         Spacer(Modifier.width(16.dp))
         action()
+    }
+}
+
+/** Theme chips with a swatch of each accent, so the colour is visible before picking it. */
+@Composable
+private fun ThemePicker(selected: AccentTheme, onSelect: (AccentTheme) -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        AccentTheme.entries.forEach { theme ->
+            val active = theme == selected
+            Row(
+                Modifier
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(if (active) VibyColors.Highlight else Color.Transparent)
+                    .border(1.dp, if (active) theme.accent else VibyColors.Divider, RoundedCornerShape(20.dp))
+                    .clickable { onSelect(theme) }
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.size(12.dp).clip(CircleShape).background(theme.accent))
+                Spacer(Modifier.width(8.dp))
+                Text(theme.label, style = MaterialTheme.typography.bodyMedium, color = VibyColors.TextPrimary)
+            }
+        }
     }
 }
 

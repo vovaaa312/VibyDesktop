@@ -8,14 +8,33 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/** Dark palette: Spotify-like neutral surfaces with a Viby violet accent. */
+/** Accent colour scheme picked in the settings; surfaces stay the same in every theme. */
+enum class AccentTheme(
+    val label: String,
+    val accent: Color,
+    val accentBright: Color,
+    /** Icons and text drawn on the accent (play buttons, primary buttons). */
+    val onAccent: Color,
+) {
+    VIBY("Viby", Color(0xFF8B6CFF), Color(0xFFA78BFF), Color.Black),
+    SPOTIFY("Spotify", Color(0xFF1DB954), Color(0xFF1ED760), Color.Black),
+    YOUTUBE("YouTube", Color(0xFFFF0033), Color(0xFFFF4E5E), Color.White),
+}
+
+/** Dark palette: Spotify-like neutral surfaces with a switchable accent ([AccentTheme]). */
 object VibyColors {
+    /** Compose state: every colour read below recomposes when the theme changes. */
+    var theme by mutableStateOf(AccentTheme.VIBY)
+
     val Background = Color(0xFF000000)
     val Panel = Color(0xFF121212)
     val Elevated = Color(0xFF1F1F1F)
@@ -25,8 +44,9 @@ object VibyColors {
     val TextPrimary = Color(0xFFFFFFFF)
     val TextSecondary = Color(0xFFB3B3B3)
     val TextMuted = Color(0xFF7A7A7A)
-    val Accent = Color(0xFF8B6CFF)
-    val AccentBright = Color(0xFFA78BFF)
+    val Accent: Color get() = theme.accent
+    val AccentBright: Color get() = theme.accentBright
+    val OnAccent: Color get() = theme.onAccent
     val Danger = Color(0xFFFF5A6E)
     val Divider = Color(0xFF2A2A2A)
 

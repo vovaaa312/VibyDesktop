@@ -6,6 +6,8 @@ import androidx.compose.runtime.setValue
 import com.viby.app.model.Playlist
 import com.viby.app.model.SortMode
 import com.viby.app.model.Track
+import com.viby.app.theme.AccentTheme
+import com.viby.app.theme.VibyColors
 import com.viby.app.ui.tracksLabel
 import com.viby.core.VibyEngine
 import com.viby.core.data.LibraryRepository
@@ -37,6 +39,8 @@ sealed interface Screen {
 }
 
 enum class SidePanel { NONE, QUEUE, LYRICS }
+
+private const val THEME_KEY = "theme"
 
 /** Formats ffmpeg decodes that the import dialog offers. */
 private val AUDIO_EXTENSIONS = listOf("mp3", "m4a", "aac", "opus", "ogg", "flac", "wav", "webm", "wma")
@@ -77,6 +81,8 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
         private set
 
     init {
+        VibyColors.theme = AccentTheme.entries.firstOrNull { it.name == settings.getString(THEME_KEY, "") }
+            ?: AccentTheme.VIBY
         engine.addListener { status -> scope.launch { engineStatus = status } }
         engine.library().addListener { library.requestReload() }
         engine.downloads().addListener(downloads::onJobsChanged)
@@ -151,6 +157,12 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
     fun close() = runCatching {
         savePlaybackNow()
         engine.close()
+    }
+
+    /** Settings → Оформление: switches the accent everywhere at once and remembers it. */
+    fun setTheme(theme: AccentTheme) {
+        VibyColors.theme = theme
+        settings.putString(THEME_KEY, theme.name)
     }
 
     fun showMessage(text: String) {

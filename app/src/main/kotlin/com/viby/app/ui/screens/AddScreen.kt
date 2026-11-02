@@ -166,7 +166,7 @@ fun AddScreen(state: AppState) {
                         }
                     }
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = VibyColors.Accent, contentColor = Color.Black),
+                colors = ButtonDefaults.buttonColors(containerColor = VibyColors.Accent, contentColor = VibyColors.OnAccent),
                 shape = RoundedCornerShape(24.dp),
                 modifier = Modifier.height(48.dp),
             ) {

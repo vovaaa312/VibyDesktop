@@ -1,8 +1,7 @@
 name: release
 
-# Push a tag like v1.0.0 to build installers for Windows, macOS and Linux and publish them
-# as a GitHub release. The in-app updater reads the latest release and verifies the
-# SHA-256 digest GitHub reports for each asset.
+# Push a tag like v1.0.0 to build installers and publish them as a GitHub release. The in-app
+# updater reads the latest release and verifies the SHA-256 digest GitHub reports for each asset.
 on:
   push:
     tags: ["v*"]
@@ -10,21 +9,34 @@ on:
 permissions:
   contents: write
 
+env:
+  # installers to build, comma separated: windows, macos, linux
+  RELEASE_PLATFORMS: windows
+
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+    steps:
+      - id: pick
+        shell: bash
+        run: |
+          node -e '
+            const all = [
+              { platform: "windows", os: "windows-latest", task: "packageMsi", files: "app/build/compose/binaries/main/msi/*.msi" },
+              { platform: "macos", os: "macos-latest", task: "packageDmg", files: "app/build/compose/binaries/main/dmg/*.dmg" },
+              { platform: "linux", os: "ubuntu-latest", task: "packageDeb", files: "app/build/compose/binaries/main/deb/*.deb" },
+            ];
+            const wanted = process.env.RELEASE_PLATFORMS.split(",").map(p => p.trim());
+            console.log("matrix=" + JSON.stringify({ include: all.filter(p => wanted.includes(p.platform)) }));
+          ' >> "$GITHUB_OUTPUT"
+
   package:
+    needs: plan
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            task: packageMsi
-            files: app/build/compose/binaries/main/msi/*.msi
-          - os: macos-latest
-            task: packageDmg
-            files: app/build/compose/binaries/main/dmg/*.dmg
-          - os: ubuntu-latest
-            task: packageDeb
-            files: app/build/compose/binaries/main/deb/*.deb
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

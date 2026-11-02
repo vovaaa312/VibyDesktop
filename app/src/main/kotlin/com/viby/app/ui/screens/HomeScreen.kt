@@ -112,7 +112,7 @@ private fun Welcome(state: AppState) {
         Spacer(Modifier.height(24.dp))
         Button(
             onClick = { state.navigate(Screen.Add) },
-            colors = ButtonDefaults.buttonColors(containerColor = VibyColors.Accent, contentColor = Color.Black),
+            colors = ButtonDefaults.buttonColors(containerColor = VibyColors.Accent, contentColor = VibyColors.OnAccent),
             shape = RoundedCornerShape(24.dp),
             modifier = Modifier.height(48.dp),
         ) { Text("Добавить с YouTube", style = MaterialTheme.typography.titleMedium) }

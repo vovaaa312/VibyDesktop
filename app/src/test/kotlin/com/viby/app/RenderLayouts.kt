@@ -8,6 +8,7 @@ import androidx.compose.ui.unit.Density
 import com.viby.app.state.AppState
 import com.viby.app.state.Screen
 import com.viby.app.state.SidePanel
+import com.viby.app.theme.AccentTheme
 import com.viby.app.theme.VibyTheme
 import com.viby.app.ui.CoverCache
 import kotlinx.coroutines.Dispatchers
@@ -72,6 +73,17 @@ fun main(args: Array<String>): Unit = runBlocking {
         scene.sendPointerEvent(PointerEventType.Move, Offset(600f, 560f))
         scene.sendPointerEvent(PointerEventType.Move, Offset(610f, 565f))
     }) { state.navigate(Screen.Home); state.sidePanel = SidePanel.NONE }
+    for (theme in AccentTheme.entries) {
+        val name = theme.name.lowercase()
+        shot("theme-$name-settings", 1200, 700) {
+            state.setTheme(theme); state.navigate(Screen.Settings); state.sidePanel = SidePanel.NONE
+        }
+        shot("theme-$name-playlist", 1200, 700) {
+            playlist?.let { state.navigate(Screen.PlaylistScreen(it.id)) }
+            state.sidePanel = SidePanel.QUEUE
+        }
+    }
+    withContext(Dispatchers.Main) { state.setTheme(AccentTheme.VIBY) }
     withContext(Dispatchers.Main) { state.engine.library().deletePlaylist(longName); state.close() }
     kotlin.system.exitProcess(0)
 }
