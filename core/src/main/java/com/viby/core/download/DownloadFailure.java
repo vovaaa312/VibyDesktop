@@ -14,6 +14,7 @@ public final class DownloadFailure {
         VIDEO_REMOVED,
         VIDEO_UNAVAILABLE,
         VIDEO_PRIVATE,
+        PLAYLIST_UNAVAILABLE,
         REGION_BLOCKED,
         AGE_RESTRICTED,
         EXTRACTOR_OUTDATED,
@@ -63,6 +64,11 @@ public final class DownloadFailure {
                 "confirm you're not a bot", "sign in to confirm you’re not a bot",
                 "sign in to confirm you're not a bot", "po token")) {
             return failure(Code.RATE_LIMITED, true, false);
+        }
+        // YouTube answers this for deleted playlists and for private ones opened without sign-in
+        if (containsAny(message, "the playlist does not exist", "this playlist is private",
+                "playlist is unavailable", "playlist does not exist")) {
+            return failure(Code.PLAYLIST_UNAVAILABLE, false, true);
         }
         if (containsAny(message, "private video", "video is private",
                 "this video is private", "members-only")) {

@@ -62,6 +62,8 @@ fun TrackRow(
     onTogglePlay: () -> Unit = onPlay,
     modifier: Modifier = Modifier,
     showAdded: Boolean = true,
+    /** Shown after the artist, e.g. the playlists of a search result. */
+    context: String? = null,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
@@ -115,11 +117,15 @@ fun TrackRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                when {
-                    track.failed != null -> "${track.artist} • ${track.failed}"
-                    track.isDownloaded -> track.artist
-                    else -> "${track.artist} • загрузка ${track.downloadProgress}%"
-                },
+                listOfNotNull(
+                    track.artist,
+                    context,
+                    when {
+                        track.failed != null -> track.failed
+                        track.isDownloaded -> null
+                        else -> "загрузка ${track.downloadProgress}%"
+                    },
+                ).joinToString(" • "),
                 style = MaterialTheme.typography.bodySmall,
                 color = VibyColors.TextSecondary,
                 maxLines = 1,

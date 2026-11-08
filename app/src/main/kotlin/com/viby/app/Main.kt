@@ -61,6 +61,7 @@ import com.viby.app.ui.screens.HomeScreen
 import com.viby.app.ui.screens.PlaylistScreen
 import com.viby.app.ui.screens.SettingsScreen
 import com.viby.app.ui.screens.StorageScreen
+import com.viby.app.ui.screens.SearchScreen
 import com.viby.app.ui.screens.YoutubePlaylistsScreen
 import com.viby.core.VibyEngine
 import com.viby.core.platform.AppDirs
@@ -155,6 +156,7 @@ fun main() = application {
                 event.isCtrlPressed && event.key == Key.DirectionLeft -> state.player.previous()
                 event.isCtrlPressed && event.key == Key.L -> state.toggleSidePanel(SidePanel.LYRICS)
                 event.isCtrlPressed && event.key == Key.Q -> state.toggleSidePanel(SidePanel.QUEUE)
+                event.isCtrlPressed && event.key == Key.F -> state.navigate(Screen.Search)
                 else -> return@Window false
             }
             true
@@ -211,6 +213,7 @@ fun App(state: AppState) {
                                     Screen.Equalizer -> EqualizerScreen(state)
                                     Screen.YoutubePlaylists -> YoutubePlaylistsScreen(state)
                                     Screen.Storage -> StorageScreen(state)
+                                    Screen.Search -> SearchScreen(state)
                                     is Screen.PlaylistScreen -> PlaylistScreen(state, screen.id)
                                 }
                             }

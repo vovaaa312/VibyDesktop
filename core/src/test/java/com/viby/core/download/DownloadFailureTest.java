@@ -15,6 +15,9 @@ class DownloadFailureTest {
     void classifiesPermanentYoutubeFailures() {
         assertCode(DownloadFailure.Code.VIDEO_PRIVATE,
                 "ERROR: Private video. Sign in if you've been granted access");
+        // a private playlist opened without sign-in (a radio saved to YouTube)
+        assertCode(DownloadFailure.Code.PLAYLIST_UNAVAILABLE,
+                "ERROR: [youtube:tab] PLbCRNrl6FIQM: YouTube said: The playlist does not exist.");
         assertCode(DownloadFailure.Code.VIDEO_REMOVED,
                 "This video has been removed due to a copyright claim");
         assertCode(DownloadFailure.Code.VIDEO_UNAVAILABLE,

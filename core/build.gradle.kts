@@ -12,6 +12,8 @@ dependencies {
     api(libs.json)
     api(libs.jspecify)
     implementation(libs.sqlite.jdbc)
+    // process priority: downloads below normal, playback above (ProcessPriority)
+    implementation(libs.jna)
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)

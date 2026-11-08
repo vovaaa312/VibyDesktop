@@ -771,6 +771,7 @@ public final class DownloadService {
             case VIDEO_REMOVED -> "Видео удалено или заблокировано правообладателем";
             case VIDEO_UNAVAILABLE -> "YouTube сообщает, что видео недоступно";
             case VIDEO_PRIVATE -> "Видео приватное или доступно только участникам";
+            case PLAYLIST_UNAVAILABLE -> "Плейлист не найден или он приватный — войдите в аккаунт YouTube";
             case REGION_BLOCKED -> "Видео недоступно в этом регионе";
             case AGE_RESTRICTED -> "Нужно подтвердить возраст или войти в YouTube";
             case EXTRACTOR_OUTDATED -> "yt-dlp не может прочитать видео — попробуйте обновить yt-dlp";

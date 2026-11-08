@@ -51,6 +51,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.scale
 import androidx.compose.material3.SwitchDefaults
@@ -139,7 +141,10 @@ fun PlaylistScreen(state: AppState, playlistId: String) {
                 } else null,
                 onSync = {
                     val source = playlist.sourceUrl
-                    if (source == null) {
+                    if (playlist.canSync && state.account.isSignedIn) {
+                        // private playlists (saved radios) are only readable through the account
+                        state.account.refreshLinked(playlist.name)
+                    } else if (source == null) {
                         state.showMessage("Этот плейлист не связан с плейлистом YouTube")
                     } else {
                         // re-running the job only downloads tracks that are missing locally
@@ -336,6 +341,7 @@ fun SearchField(
     onQuery: (String) -> Unit,
     placeholder: String = "Поиск в плейлисте",
     modifier: Modifier = Modifier.width(240.dp),
+    focusRequester: FocusRequester? = null,
 ) {
     Row(
         modifier
@@ -357,7 +363,7 @@ fun SearchField(
                 singleLine = true,
                 textStyle = TextStyle(color = VibyColors.TextPrimary, fontSize = MaterialTheme.typography.bodyMedium.fontSize),
                 cursorBrush = SolidColor(VibyColors.Accent),
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().let { m -> focusRequester?.let { m.focusRequester(it) } ?: m },
             )
         }
         if (query.isNotEmpty()) {

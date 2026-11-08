@@ -109,6 +109,8 @@ fun main(args: Array<String>): Unit = runBlocking {
         }
         withContext(Dispatchers.Main) { state.library.saveView(p.id, saved) }
     }
+    shot("search", 1360, 860) { state.searchQuery = "mol"; state.navigate(Screen.Search) }
+    shot("search-empty", 1000, 600) { state.searchQuery = ""; state.navigate(Screen.Search) }
     withContext(Dispatchers.Main) { state.engine.library().deletePlaylist(longName); state.close() }
     kotlin.system.exitProcess(0)
 }

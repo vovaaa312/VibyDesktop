@@ -18,6 +18,8 @@ import javax.sound.sampled.AudioSystem;
 import javax.sound.sampled.LineUnavailableException;
 import javax.sound.sampled.SourceDataLine;
 
+import com.viby.core.util.ProcessPriority;
+
 /**
  * Plays local files and online streams: ffmpeg decodes to 16-bit PCM, the equalizer and
  * volume are applied in Java, and the result goes to the default sound device.
@@ -30,8 +32,12 @@ public final class AudioEngine implements AutoCloseable {
     public static final int SAMPLE_RATE = 48_000;
     private static final int CHANNELS = 2;
     private static final int FRAME_BYTES = 2 * CHANNELS;
-    /** ~150 ms device buffer keeps pause, seek and volume responsive. */
-    private static final int LINE_BUFFER_BYTES = SAMPLE_RATE * FRAME_BYTES * 150 / 1000;
+    /**
+     * Device buffer: big enough to ride out a busy CPU (a download converting to MP3 broke up
+     * the sound at 150 ms), small enough that volume and EQ changes still feel immediate.
+     * Pause stops the line itself, so it is instant regardless.
+     */
+    private static final int LINE_BUFFER_BYTES = SAMPLE_RATE * FRAME_BYTES * 350 / 1000;
     private static final int CHUNK_FRAMES = 1024;
 
     public interface Listener {
@@ -155,6 +161,7 @@ public final class AudioEngine implements AutoCloseable {
         void start() {
             Thread thread = new Thread(this::run, "viby-audio");
             thread.setDaemon(true);
+            thread.setPriority(Thread.MAX_PRIORITY);
             thread.start();
         }
 
@@ -210,6 +217,7 @@ public final class AudioEngine implements AutoCloseable {
             try {
                 Process decoder = new ProcessBuilder(command(ffmpeg.get(), source, startMs)).start();
                 process = decoder;
+                ProcessPriority.playback(decoder);
                 Thread errReader = new Thread(() -> drain(decoder.getErrorStream(), errors), "viby-ffmpeg-err");
                 errReader.setDaemon(true);
                 errReader.start();

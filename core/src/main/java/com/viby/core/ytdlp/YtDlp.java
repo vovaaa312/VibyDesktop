@@ -40,6 +40,11 @@ public final class YtDlp {
     private final Map<String, Process> processes = new ConcurrentHashMap<>();
     private final Set<String> canceled = ConcurrentHashMap.newKeySet();
     private volatile @Nullable CookieFailureListener cookieFailureListener;
+    /** The browser whose cookies failed last and until when to stop trying it (one failed run per track otherwise). */
+    private volatile @Nullable String brokenCookieBrowser;
+    private volatile long brokenCookiesUntil;
+
+    static final long COOKIE_RETRY_AFTER_MS = 10 * 60_000L;
 
     public YtDlp(ToolPaths tools) {
         this.tools = tools;
@@ -61,6 +66,11 @@ public final class YtDlp {
     public YtDlpResponse execute(YtDlpRequest request, @Nullable String processId,
                                  @Nullable ProgressCallback callback)
             throws YtDlpException, InterruptedException {
+        String browser = request.getOption("--cookies-from-browser");
+        if (browser != null && browser.equals(brokenCookieBrowser)
+                && System.currentTimeMillis() < brokenCookiesUntil) {
+            return run(request.copy().removeOption("--cookies-from-browser"), processId, callback);
+        }
         try {
             return run(request, processId, callback);
         } catch (YtDlpException e) {
@@ -68,6 +78,8 @@ public final class YtDlp {
                     || !isCookieLoadError(e.getMessage())) {
                 throw e;
             }
+            brokenCookieBrowser = browser;
+            brokenCookiesUntil = System.currentTimeMillis() + COOKIE_RETRY_AFTER_MS;
             CookieFailureListener listener = cookieFailureListener;
             if (listener != null) {
                 listener.onCookieFailure(e.getMessage());
@@ -101,6 +113,8 @@ public final class YtDlp {
             builder.environment().put("PYTHONIOENCODING", "utf-8");
             builder.environment().put("PYTHONUTF8", "1");
             process = builder.start();
+            // downloads must not take the CPU from playback or a game
+            com.viby.core.util.ProcessPriority.background(process);
         } catch (IOException e) {
             throw new YtDlpException("Unable to start yt-dlp: " + e.getMessage(), e);
         }

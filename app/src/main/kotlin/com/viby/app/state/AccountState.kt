@@ -76,6 +76,13 @@ class AccountState(private val app: AppState) {
         app.scope.launch { app.showMessage("«${playlist.title()}» добавлен в загрузки") }
     }
 
+    /** "Обновить из YouTube" for a playlist linked to the account, private ones included. */
+    fun refreshLinked(playlistName: String) = task {
+        if (account.refreshLinked(playlistName)) {
+            app.scope.launch { app.showMessage("Проверяю новые треки в плейлисте YouTube") }
+        }
+    }
+
     /** Android YoutubeSyncController.showPlaylistDialog for an unsaved radio. */
     fun offerSaveRadio(playlistName: String) {
         app.ask(

@@ -139,6 +139,21 @@ public final class YoutubeAccount {
                 playlistName, playlist.title(), entries);
     }
 
+    /**
+     * "Обновить из YouTube" for a playlist linked to the account: lists it through the API,
+     * so private playlists (saved radios) work without browser cookies. Tracks already in the
+     * library are skipped by the download job. Returns false when the playlist is not linked.
+     */
+    public boolean refreshLinked(String playlistName) throws Exception {
+        PlaylistSource source = library.source(playlistName);
+        if (source == null || source.youtubePlaylistId == null || source.youtubePlaylistId.isEmpty()) {
+            return false;
+        }
+        download(new YoutubePlaylistApi.AccountPlaylist(source.youtubePlaylistId, playlistName, 0, "", null),
+                playlistName);
+        return true;
+    }
+
     /** Android saveRadio: the radio snapshot becomes a private YouTube playlist linked for sync. */
     public YoutubePlaylistSync.SaveRadioResult saveRadio(String playlistName) throws Exception {
         try {

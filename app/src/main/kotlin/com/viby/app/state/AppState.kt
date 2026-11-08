@@ -38,6 +38,7 @@ sealed interface Screen {
     data object Equalizer : Screen
     data object YoutubePlaylists : Screen
     data object Storage : Screen
+    data object Search : Screen
     data class PlaylistScreen(val id: String) : Screen
 }
 
@@ -312,6 +313,9 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
     fun consumeMessage() {
         message = null
     }
+
+    /** The global search text; kept while browsing so "Назад" returns to the same results. */
+    var searchQuery by mutableStateOf("")
 
     fun navigate(target: Screen) {
         if (target == screen) return

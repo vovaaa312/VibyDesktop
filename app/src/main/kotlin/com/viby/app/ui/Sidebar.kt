@@ -28,6 +28,7 @@ import androidx.compose.material.icons.rounded.FileOpen
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.SystemUpdateAlt
@@ -85,6 +86,7 @@ private fun SidebarContent(state: AppState) {
         Panel(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(vertical = 8.dp)) {
                 NavItem(Icons.Rounded.Home, "Главная", state.screen == Screen.Home) { state.navigate(Screen.Home) }
+                NavItem(Icons.Rounded.Search, "Поиск", state.screen == Screen.Search) { state.navigate(Screen.Search) }
                 NavItem(Icons.Rounded.AddLink, "Добавить с YouTube", state.screen == Screen.Add) {
                     state.navigate(Screen.Add)
                 }
