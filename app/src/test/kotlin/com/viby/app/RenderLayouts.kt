@@ -95,6 +95,11 @@ fun main(args: Array<String>): Unit = runBlocking {
     shot("toast-long-info", 1000, 600) { state.showMessage("Длинное сообщение. ".repeat(30)) }
     shot("error-details", 1360, 860) { state.consumeMessage(); state.errorDetails = forbidden }
     withContext(Dispatchers.Main) { state.errorDetails = null }
+    shot("storage", 1360, 900, interact = { scene ->
+        while (state.storage.report == null || state.storage.busy != null) delay(100)
+        scene.render(100_000_000)
+    }) { state.navigate(Screen.Storage); state.sidePanel = SidePanel.NONE }
+    shot("settings-library", 1360, 900) { state.navigate(Screen.Settings) }
     withContext(Dispatchers.Main) { state.engine.library().deletePlaylist(longName); state.close() }
     kotlin.system.exitProcess(0)
 }

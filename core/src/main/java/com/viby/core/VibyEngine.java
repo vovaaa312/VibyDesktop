@@ -3,8 +3,13 @@ package com.viby.core;
 import com.viby.core.data.Database;
 import com.viby.core.data.LibraryRepository;
 import com.viby.core.data.RoomPendingDownloadDao;
+import com.viby.core.data.AudioProbe;
+import com.viby.core.data.LibraryBackup;
 import com.viby.core.data.LibraryFiles;
+import com.viby.core.data.LibraryScanner;
+import com.viby.core.data.LibraryStorage;
 import com.viby.core.data.RoomTrackDao;
+import com.viby.core.data.Track;
 import com.viby.core.download.AudioDownloader;
 import com.viby.core.download.DownloadService;
 import com.viby.core.download.DuplicateTracks;
@@ -61,6 +66,9 @@ public final class VibyEngine implements AutoCloseable {
     private final DownloadService downloads;
     private final DuplicateTracks duplicates;
     private final LibraryFiles files;
+    private final LibraryScanner scanner;
+    private final LibraryBackup backup;
+    private final LibraryStorage storage;
     private final NetworkMonitor network = new NetworkMonitor();
     private final AudioEngine audio;
     private final EqualizerController equalizer;
@@ -84,6 +92,9 @@ public final class VibyEngine implements AutoCloseable {
                 this::isReady, settings::musicDirectory, settings::audioFormat);
         this.duplicates = new DuplicateTracks(trackDao);
         this.files = new LibraryFiles(trackDao, settings::musicDirectory, tools::ffprobe);
+        this.scanner = new LibraryScanner(library, settings::musicDirectory, AudioProbe.ffprobe(tools::ffprobe));
+        this.backup = new LibraryBackup(library, settings, settings::musicDirectory);
+        this.storage = new LibraryStorage(library, settings::musicDirectory);
         this.audio = new AudioEngine(tools::ffmpeg);
         this.equalizer = new EqualizerController(audio.equalizer(), settings);
         this.account = new YoutubeAccount(new GoogleOAuth(GoogleOAuth.ClientConfig.bundled(),
@@ -169,6 +180,19 @@ public final class VibyEngine implements AutoCloseable {
         return files;
     }
 
+    /** Relinks moved files and adds untracked ones (stage 3: data safety). */
+    public LibraryScanner scanner() {
+        return scanner;
+    }
+
+    public LibraryBackup backup() {
+        return backup;
+    }
+
+    public LibraryStorage storage() {
+        return storage;
+    }
+
     public DuplicateTracks duplicates() {
         return duplicates;
     }
@@ -183,6 +207,31 @@ public final class VibyEngine implements AutoCloseable {
 
     public AudioEngine audio() {
         return audio;
+    }
+
+    /**
+     * Downloads the files of tracks again (lost after a reinstall or restored from a backup):
+     * they become pending entries that keep their place and are filled in by the downloads.
+     *
+     * @return how many were queued; tracks without a YouTube link cannot be restored
+     */
+    public int redownload(List<Track> tracks) {
+        List<Track> queued = new java.util.ArrayList<>();
+        for (Track track : tracks) {
+            if (track.sourceUrl == null && track.videoId != null) {
+                track.sourceUrl = "https://www.youtube.com/watch?v=" + track.videoId;
+            }
+            if (track.sourceUrl == null || track.sourceUrl.isEmpty()) {
+                continue;
+            }
+            track.downloaded = false;
+            track.downloadState = Track.DOWNLOAD_WAITING;
+            track.downloadProgress = 0;
+            queued.add(track);
+        }
+        library.updateAll(queued);
+        queued.forEach(downloads::retryPersistedTrack);
+        return queued.size();
     }
 
     /**

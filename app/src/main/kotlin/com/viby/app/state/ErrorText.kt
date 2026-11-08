@@ -14,15 +14,17 @@ object ErrorText {
     /** "[in#0 @ 0000024…]", "ERROR:", "WARNING:" prefixes of tool output. */
     private val PREFIX = Regex("""^(\[[^\]]*]\s*|(ERROR|WARNING):\s*)+""")
 
-    fun humanize(raw: String?): String {
+    fun humanize(raw: String?): String = known(raw) ?: shorten(raw.orEmpty().replace(URL, "").trim())
+
+    /** A sentence for recognised failures (network, 403, YouTube refusals…); null for anything else. */
+    fun known(raw: String?): String? {
         // stream URLs are long random tokens that can accidentally match the keywords below
         val text = raw.orEmpty().replace(URL, "").trim()
-        if (text.isEmpty()) return "Неизвестная ошибка"
+        if (text.isEmpty()) return null
         val lower = text.lowercase()
         if ("403" in lower && "forbidden" in lower) return "YouTube отклонил запрос (403) — попробуйте ещё раз"
         val code = DownloadFailure.classify(RuntimeException(text)).code
-        if (code != DownloadFailure.Code.UNKNOWN) return DownloadService.failureMessage(code)
-        return shorten(text)
+        return if (code != DownloadFailure.Code.UNKNOWN) DownloadService.failureMessage(code) else null
     }
 
     /** First meaningful line without tool prefixes, cut to a toast-sized length. */

@@ -24,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AddLink
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.FileOpen
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.LibraryMusic
@@ -108,6 +109,7 @@ private fun SidebarContent(state: AppState) {
                     Spacer(Modifier.width(12.dp))
                     Text("Медиатека", style = MaterialTheme.typography.titleMedium,
                         color = VibyColors.TextSecondary, modifier = Modifier.weight(1f))
+                    IconAction(Icons.Rounded.FileOpen, "Импорт плейлиста из файла (JSON Viby или резервная копия)", { state.storage.restoreLibrary("Импорт плейлиста") })
                     IconAction(Icons.Rounded.Add, "Создать плейлист", { dialog = PlaylistDialog.Create })
                 }
                 ScrollLazyColumn(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
@@ -118,6 +120,8 @@ private fun SidebarContent(state: AppState) {
                                 add(MenuAction("Перемешать") { state.playPlaylist(playlist, shuffle = true) })
                                 add(MenuAction("Переименовать") { dialog = PlaylistDialog.Rename(playlist) })
                                 add(MenuAction("Добавить файлы с компьютера…") { state.library.importFiles(playlist.name) })
+                                add(MenuAction("Экспорт в M3U…") { state.storage.exportPlaylist(playlist.name, json = false) })
+                                add(MenuAction("Экспорт в JSON (Viby)…") { state.storage.exportPlaylist(playlist.name, json = true) })
                                 if (state.account.isSignedIn && playlist.isUnsavedRadio) {
                                     add(MenuAction("Сохранить радио на YouTube") { state.account.offerSaveRadio(playlist.name) })
                                 } else if (state.account.isSignedIn && !playlist.canSync) {

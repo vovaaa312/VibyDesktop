@@ -83,6 +83,42 @@ public final class LibraryRepository {
         return call(() -> tracks.byPlaylist(playlistName));
     }
 
+    /** Every track of every playlist (backup, storage report, relinking). */
+    public List<Track> allTracks() {
+        return call(tracks::all);
+    }
+
+    /** Playlist names with their creation time, including playlists known only from tracks. */
+    public Map<String, Long> playlistCreatedAt() {
+        return call(() -> {
+            Map<String, Long> created = new LinkedHashMap<>(playlists.all());
+            for (String name : tracks.playlistNames()) {
+                created.putIfAbsent(name, 0L);
+            }
+            return created;
+        });
+    }
+
+    /** Restores a playlist row with its original creation time; existing rows are kept. */
+    public void ensurePlaylist(String name, long createdAt) {
+        if (call(() -> playlists.insert(name, createdAt))) {
+            notifyChanged();
+        }
+    }
+
+    /** Batch update in one transaction with a single change notification. */
+    public void updateAll(Collection<Track> items) {
+        if (items.isEmpty()) {
+            return;
+        }
+        database.runInTransaction(() -> {
+            for (Track track : items) {
+                run(() -> tracks.update(track));
+            }
+        });
+        notifyChanged();
+    }
+
     public @Nullable Track track(long id) {
         return call(() -> tracks.byId(id));
     }

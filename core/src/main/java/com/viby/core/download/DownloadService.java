@@ -866,6 +866,7 @@ public final class DownloadService {
         job.downloadedBytes = 0;
         job.totalBytes = 0;
         File dir = StorageHelper.playlistDir(musicDirectory.get(), playlist);
+        StorageHelper.requireSpace(dir.toPath(), durationMs);
         String baseName = StorageHelper.sanitize(title);
         // защита от одинаковых названий разных видео
         if (new File(dir, baseName + ".mp3").exists()

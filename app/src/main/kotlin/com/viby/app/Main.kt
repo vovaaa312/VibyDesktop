@@ -60,6 +60,7 @@ import com.viby.app.ui.screens.EqualizerScreen
 import com.viby.app.ui.screens.HomeScreen
 import com.viby.app.ui.screens.PlaylistScreen
 import com.viby.app.ui.screens.SettingsScreen
+import com.viby.app.ui.screens.StorageScreen
 import com.viby.app.ui.screens.YoutubePlaylistsScreen
 import com.viby.core.VibyEngine
 import com.viby.core.platform.AppDirs
@@ -209,6 +210,7 @@ fun App(state: AppState) {
                                     Screen.Settings -> SettingsScreen(state)
                                     Screen.Equalizer -> EqualizerScreen(state)
                                     Screen.YoutubePlaylists -> YoutubePlaylistsScreen(state)
+                                    Screen.Storage -> StorageScreen(state)
                                     is Screen.PlaylistScreen -> PlaylistScreen(state, screen.id)
                                 }
                             }

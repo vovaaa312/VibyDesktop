@@ -285,7 +285,9 @@ private fun loadLyrics(state: AppState, track: Track): LyricsResult = try {
     )
 } catch (e: Throwable) {
     // lyrics are optional: no failure here (network, YouTube changes, linkage errors) may close the app
-    LyricsResult.Missing("Не удалось загрузить текст: ${ErrorText.humanize(e.message ?: e.javaClass.simpleName)}")
+    // only recognised causes are named; internal errors (parsing, YouTube changes) stay out of the panel
+    val reason = ErrorText.known(e.message ?: e.javaClass.simpleName)
+    LyricsResult.Missing(reason?.let { "Не удалось загрузить текст: $it" } ?: "Не удалось загрузить текст — попробуйте позже")
 }
 
 @Composable

@@ -533,6 +533,10 @@ public final class YoutubeLyricsRepository {
     }
 
     static String parseJson3(String payload) throws Exception {
+        // YouTube answers some caption requests with an empty body (no PO token): no subtitles
+        if (!payload.stripLeading().startsWith("{")) {
+            return "";
+        }
         JSONArray events = new JSONObject(payload).optJSONArray("events");
         if (events == null) {
             return "";

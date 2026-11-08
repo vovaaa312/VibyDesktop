@@ -21,4 +21,22 @@ public final class Formats {
         }
         return String.format(Locale.US, "%d:%02d", minutes, seconds);
     }
+
+    /** 1536 → "1,5 КБ", 734003200 → "700 МБ" (binary units, Russian labels). */
+    public static String bytes(long bytes) {
+        if (bytes < 1024) {
+            return Math.max(0, bytes) + " Б";
+        }
+        String[] units = {"КБ", "МБ", "ГБ", "ТБ"};
+        double value = bytes;
+        int unit = -1;
+        while (value >= 1024 && unit < units.length - 1) {
+            value /= 1024;
+            unit++;
+        }
+        String number = value >= 100 || value == Math.floor(value)
+                ? String.format(Locale.ROOT, "%.0f", value)
+                : String.format(Locale.ROOT, "%.1f", value).replace('.', ',');
+        return number + " " + units[unit];
+    }
 }

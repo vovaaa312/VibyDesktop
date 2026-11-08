@@ -24,16 +24,22 @@ public final class EqualizerController {
     private String preset = EqPresets.NAMES[0];
     private float[] gains = new float[Equalizer.BANDS];
     private float preamp;
-    private final JSONObject customPresets;
+    private JSONObject customPresets;
 
     public EqualizerController(Equalizer equalizer, Settings settings) {
         this.equalizer = equalizer;
         this.settings = settings;
+        reload();
+    }
+
+    /** Reads the saved state again, e.g. after a library backup restored the settings. */
+    public synchronized void reload() {
         JSONObject saved = settings.getJson(KEY);
         enabled = saved.optBoolean("enabled", false);
         preset = saved.optString("preset", EqPresets.NAMES[0]);
         preamp = (float) saved.optDouble("preamp", 0);
         JSONArray savedGains = saved.optJSONArray("gains");
+        gains = new float[Equalizer.BANDS];
         if (savedGains != null && savedGains.length() == Equalizer.BANDS) {
             for (int band = 0; band < Equalizer.BANDS; band++) {
                 gains[band] = (float) savedGains.optDouble(band, 0);

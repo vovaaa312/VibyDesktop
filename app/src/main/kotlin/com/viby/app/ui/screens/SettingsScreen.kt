@@ -35,6 +35,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.viby.app.state.AppState
+import com.viby.app.state.PromptAction
+import com.viby.app.state.Screen
 import com.viby.app.theme.AccentTheme
 import com.viby.app.theme.VibyColors
 import com.viby.app.ui.ScrollColumn
@@ -76,8 +78,40 @@ fun SettingsScreen(state: AppState) {
             Section("Библиотека") {
                 SettingRow("Папка с музыкой", musicDir.toString()) {
                     OutlinedButton(onClick = {
-                        chooseDirectory(musicDir)?.let { musicDir = it; settings.setMusicDirectory(it) }
+                        chooseDirectory(musicDir)?.let {
+                            musicDir = it
+                            settings.setMusicDirectory(it)
+                            state.ask(
+                                "Найти музыку в новой папке?",
+                                "Треки медиатеки будут перепривязаны к файлам в этой папке, а файлы, которых нет " +
+                                    "в медиатеке, добавятся в плейлисты по именам своих подпапок.",
+                                PromptAction("Найти и добавить файлы") { state.storage.scan(adopt = true) },
+                            )
+                        }
                     }) { Text("Изменить") }
+                }
+                SettingRow("Хранилище", "Размер плейлистов, свободное место, поиск потерянных файлов и очистка") {
+                    OutlinedButton(onClick = { state.navigate(Screen.Storage) }) { Text("Открыть") }
+                }
+                SettingRow(
+                    "Резервная копия",
+                    "Плейлисты, порядок, связи с YouTube и оформление. Без cookies и данных аккаунта",
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(enabled = state.storage.busy == null, onClick = {
+                            state.ask(
+                                "Резервная копия медиатеки", null,
+                                PromptAction("Только данные (.json, несколько КБ)") { state.storage.exportLibrary(withMusic = false) },
+                                PromptAction("Данные и музыка (.zip)") { state.storage.exportLibrary(withMusic = true) },
+                            )
+                        }) { Text("Создать") }
+                        OutlinedButton(enabled = state.storage.busy == null, onClick = state.storage::restoreLibrary) {
+                            Text("Восстановить")
+                        }
+                    }
+                }
+                state.storage.busy?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = VibyColors.AccentBright)
                 }
             }
 
@@ -202,7 +236,7 @@ fun SettingsScreen(state: AppState) {
 }
 
 @Composable
-private fun Section(title: String, content: @Composable () -> Unit) {
+internal fun Section(title: String, content: @Composable () -> Unit) {
     Spacer(Modifier.height(32.dp))
     Text(title, style = MaterialTheme.typography.titleLarge, color = VibyColors.TextPrimary)
     Spacer(Modifier.height(12.dp))
@@ -210,7 +244,7 @@ private fun Section(title: String, content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun SettingRow(title: String, subtitle: String, action: @Composable () -> Unit) {
+internal fun SettingRow(title: String, subtitle: String, action: @Composable () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.bodyLarge, color = VibyColors.TextPrimary)

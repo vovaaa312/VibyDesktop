@@ -3,16 +3,12 @@ package com.viby.core.data;
 import com.viby.core.util.StorageHelper;
 
 import org.jspecify.annotations.Nullable;
-import org.json.JSONObject;
 
 import java.io.File;
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -24,16 +20,15 @@ import java.util.logging.Logger;
 public final class LibraryFiles {
 
     private static final Logger LOG = Logger.getLogger(LibraryFiles.class.getName());
-    private static final long PROBE_TIMEOUT_SECONDS = 15;
 
     private final RoomTrackDao dao;
     private final Supplier<Path> musicDirectory;
-    private final Supplier<Path> ffprobe;
+    private final AudioProbe.Reader probe;
 
     public LibraryFiles(RoomTrackDao dao, Supplier<Path> musicDirectory, Supplier<Path> ffprobe) {
         this.dao = dao;
         this.musicDirectory = musicDirectory;
-        this.ffprobe = ffprobe;
+        this.probe = AudioProbe.ffprobe(ffprobe);
     }
 
     /** Copies the files into the playlist folder and adds them to its end; returns how many. */
@@ -55,12 +50,12 @@ public final class LibraryFiles {
                     StorageHelper.sanitize(source.getFileName().toString()), System.currentTimeMillis());
             Files.copy(source, destination.toPath(), StandardCopyOption.COPY_ATTRIBUTES);
 
-            MediaInfo metadata = readMetadata(destination);
+            AudioProbe.Info metadata = probe.read(destination);
             Track track = new Track();
-            track.title = hasText(metadata.title)
-                    ? metadata.title : stripExtension(destination.getName());
-            track.uploader = metadata.artist;
-            track.durationMs = metadata.durationMs;
+            track.title = hasText(metadata.title())
+                    ? metadata.title() : stripExtension(destination.getName());
+            track.uploader = metadata.artist();
+            track.durationMs = metadata.durationMs();
             track.filePath = destination.getAbsolutePath();
             track.playlistName = playlist;
             track.position = dao.nextPosition(playlist);
@@ -75,47 +70,6 @@ public final class LibraryFiles {
             }
             return false;
         }
-    }
-
-    /** ffprobe in place of Android's MediaMetadataRetriever; empty info when it fails. */
-    private MediaInfo readMetadata(File file) {
-        try {
-            Process probe = new ProcessBuilder(ffprobe.get().toString(), "-v", "error",
-                    "-show_entries", "format=duration:format_tags=title,artist",
-                    "-of", "json", file.getAbsolutePath())
-                    .redirectError(ProcessBuilder.Redirect.DISCARD)
-                    .start();
-            String output = new String(probe.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-            if (!probe.waitFor(PROBE_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-                probe.destroyForcibly();
-                return MediaInfo.EMPTY;
-            }
-            JSONObject format = new JSONObject(output).optJSONObject("format");
-            if (format == null) {
-                return MediaInfo.EMPTY;
-            }
-            JSONObject tags = format.optJSONObject("tags");
-            return new MediaInfo(tag(tags, "title"), tag(tags, "artist"),
-                    parseSeconds(format.optString("duration", null)));
-        } catch (IOException | RuntimeException error) {
-            return MediaInfo.EMPTY;
-        } catch (InterruptedException error) {
-            Thread.currentThread().interrupt();
-            return MediaInfo.EMPTY;
-        }
-    }
-
-    /** Tag keys are upper case in some containers (TITLE in Vorbis comments). */
-    private static @Nullable String tag(@Nullable JSONObject tags, String key) {
-        if (tags == null) {
-            return null;
-        }
-        for (String name : tags.keySet()) {
-            if (name.equalsIgnoreCase(key)) {
-                return tags.optString(name, null);
-            }
-        }
-        return null;
     }
 
     static File uniqueDestination(File directory, String name, long suffix) {
@@ -159,9 +113,5 @@ public final class LibraryFiles {
 
     private static boolean hasText(@Nullable String value) {
         return value != null && !value.isEmpty();
-    }
-
-    private record MediaInfo(@Nullable String title, @Nullable String artist, long durationMs) {
-        static final MediaInfo EMPTY = new MediaInfo(null, null, 0L);
     }
 }

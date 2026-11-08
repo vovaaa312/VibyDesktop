@@ -35,6 +35,7 @@ sealed interface Screen {
     data object Settings : Screen
     data object Equalizer : Screen
     data object YoutubePlaylists : Screen
+    data object Storage : Screen
     data class PlaylistScreen(val id: String) : Screen
 }
 
@@ -67,6 +68,7 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
     val downloads = DownloadsState(this)
     val account = AccountState(this)
     val updates = UpdateState(this)
+    val storage = StorageState(this)
 
     var engineStatus by mutableStateOf(engine.status())
         private set
@@ -195,6 +197,13 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
     fun close() = runCatching {
         savePlaybackNow()
         engine.close()
+    }
+
+    /** Settings a backup restored take effect at once: accent theme and equalizer. */
+    fun reloadSettings() {
+        VibyColors.theme = AccentTheme.entries.firstOrNull { it.name == settings.getString(THEME_KEY, "") }
+            ?: AccentTheme.VIBY
+        engine.equalizer().reload()
     }
 
     /** Settings → Оформление: switches the accent everywhere at once and remembers it. */
