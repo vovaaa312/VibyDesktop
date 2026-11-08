@@ -179,4 +179,27 @@ class PlayerStateTest {
         assertEquals("21 трек", tracksLabel(21))
         assertEquals("25 треков", tracksLabel(25))
     }
+
+    @Test
+    fun changedSortReordersTheQueueAroundTheCurrentTrack() {
+        val player = PlayerState()
+        player.playQueue(tracks, tracks[2], "p")
+        player.syncWithPlaylist("p", tracks.reversed())
+        assertEquals(tracks.reversed().map { it.id }, ids(player))
+        assertEquals("t3", player.current?.id)
+        player.next()
+        assertEquals("t2", player.current?.id)
+    }
+
+    @Test
+    fun changedSortKeepsTheShuffledOrder() {
+        val player = PlayerState()
+        player.playQueue(tracks, tracks[0], "p")
+        player.toggleShuffle()
+        val shuffled = ids(player)
+        player.syncWithPlaylist("p", tracks.reversed())
+        assertEquals(shuffled, ids(player))
+        player.toggleShuffle()
+        assertEquals(tracks.reversed().map { it.id }, ids(player))
+    }
 }

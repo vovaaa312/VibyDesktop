@@ -4,8 +4,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.viby.app.model.Playlist
+import com.viby.app.model.PlaylistView
 import com.viby.app.model.SortMode
 import com.viby.app.model.Track
+import com.viby.app.model.TrackFilter
 import com.viby.app.theme.AccentTheme
 import com.viby.app.theme.VibyColors
 import com.viby.app.ui.tracksLabel
@@ -45,6 +47,9 @@ private const val THEME_KEY = "theme"
 private const val STREAM_RETRY_INTERVAL_MS = 30_000L
 
 /** Formats ffmpeg decodes that the import dialog offers. */
+/** Settings key: playlist id → saved sort and filter. */
+private const val VIEWS_KEY = "playlistViews"
+
 private val AUDIO_EXTENSIONS = listOf("mp3", "m4a", "aac", "opus", "ogg", "flac", "wav", "webm", "wma")
 
 class PromptAction(val label: String, val run: () -> Unit)
@@ -328,12 +333,22 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
      * Android PlaybackQueueController.playLocalTrack / playResolvedStream: the queue holds the
      * playable (downloaded) tracks; a pending start track plays as a stream inside a custom queue.
      */
+    /** The playlist's tracks in the sort the user picked for it: the queue follows what the screen shows. */
+    fun ordered(playlist: Playlist): List<Track> = library.sorted(playlist.tracks, library.view(playlist.id).sort)
+
+    /** Re-orders a queue built from [playlistId] after its sort changed or its tracks did. */
+    internal fun resyncQueue(playlistId: String) {
+        if (player.contextPlaylistId != playlistId) return
+        library.playlist(playlistId)?.let { player.syncWithPlaylist(playlistId, playable(ordered(it))) }
+    }
+
     fun playPlaylist(playlist: Playlist, start: Track? = null, shuffle: Boolean = false) {
-        val playable = playable(playlist.tracks)
+        val tracks = ordered(playlist)
+        val playable = playable(tracks)
         if (shuffle) player.setShuffleEnabled(true)
         if (start != null && !isPlayableLocal(start)) {
             // keep the pending track at its place among the local ones
-            val queue = playlist.tracks.filter { it.id == start.id || isPlayableLocal(it) }
+            val queue = tracks.filter { it.id == start.id || isPlayableLocal(it) }
             player.playWithPending(queue, start, playlist.id)
             return
         }
@@ -377,7 +392,7 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
     /** Restores the last queue once the library is loaded (PlaybackStateStore.restore). */
     internal fun onLibraryLoaded() {
         if (playbackRestored) {
-            player.contextPlaylistId?.let { id -> library.playlist(id)?.let { player.syncWithPlaylist(id, playable(it.tracks)) } }
+            player.contextPlaylistId?.let(::resyncQueue)
             return
         }
         playbackRestored = true
@@ -450,6 +465,27 @@ class LibraryState(private val app: AppState) {
 
     fun rename(from: String, to: String) = app.io {
         if (!app.engine.library().renamePlaylist(from, to)) error("Плейлист «$to» уже существует")
+        app.scope.launch { view(from).takeIf { it != PlaylistView() }?.let { saveView(to, it); saveView(from, PlaylistView()) } }
+    }
+
+    /** The sort and filter the user picked for [playlistId], remembered across restarts. */
+    fun view(playlistId: String): PlaylistView {
+        val saved = app.settings.getJson(VIEWS_KEY)?.optJSONObject(playlistId) ?: return PlaylistView()
+        return PlaylistView(
+            sort = SortMode.entries.firstOrNull { it.name == saved.optString("sort") } ?: SortMode.YOUTUBE,
+            filter = TrackFilter.entries.firstOrNull { it.name == saved.optString("filter") } ?: TrackFilter.ALL,
+        )
+    }
+
+    fun saveView(playlistId: String, view: PlaylistView) {
+        val views = app.settings.getJson(VIEWS_KEY) ?: org.json.JSONObject()
+        if (view == PlaylistView()) {
+            views.remove(playlistId)
+        } else {
+            views.put(playlistId, org.json.JSONObject().put("sort", view.sort.name).put("filter", view.filter.name))
+        }
+        app.settings.putJson(VIEWS_KEY, views)
+        app.resyncQueue(playlistId)
     }
 
     fun removeTracks(trackIds: Set<String>, deleteFiles: Boolean = false) = app.io {
@@ -482,6 +518,9 @@ class LibraryState(private val app: AppState) {
 
     fun recentTracks(limit: Int): List<Track> =
         playlists.flatMap { it.tracks }.filter { it.isDownloaded }.sortedByDescending { it.addedAt }.take(limit)
+
+    fun visible(tracks: List<Track>, view: PlaylistView): List<Track> =
+        sorted(tracks, view.sort).filter(view.filter::matches)
 
     fun sorted(tracks: List<Track>, mode: SortMode): List<Track> = when (mode) {
         // playlist order as stored: YouTube order for imported playlists, sent tracks on top

@@ -49,3 +49,18 @@ enum class SortMode(val label: String) {
     ARTIST("Исполнитель"),
     DURATION("Длительность"),
 }
+
+/** Which tracks a playlist shows; kept per playlist together with the sort (PlaylistView). */
+enum class TrackFilter(val label: String) {
+    ALL("Все треки"),
+    NOT_DOWNLOADED("Не загружено"),
+    FAILED("С ошибкой");
+
+    fun matches(track: Track): Boolean = when (this) {
+        ALL -> true
+        NOT_DOWNLOADED -> !track.isDownloaded
+        FAILED -> track.failed != null
+    }
+}
+
+data class PlaylistView(val sort: SortMode = SortMode.YOUTUBE, val filter: TrackFilter = TrackFilter.ALL)

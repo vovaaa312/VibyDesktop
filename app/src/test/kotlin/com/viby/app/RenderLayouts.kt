@@ -100,6 +100,15 @@ fun main(args: Array<String>): Unit = runBlocking {
         scene.render(100_000_000)
     }) { state.navigate(Screen.Storage); state.sidePanel = SidePanel.NONE }
     shot("settings-library", 1360, 900) { state.navigate(Screen.Settings) }
+    // a saved filter must be visible in the header, not silently hide tracks
+    playlist?.let { p ->
+        val saved = state.library.view(p.id)
+        shot("playlist-filter", 1360, 860) {
+            state.library.saveView(p.id, com.viby.app.model.PlaylistView(com.viby.app.model.SortMode.TITLE, com.viby.app.model.TrackFilter.NOT_DOWNLOADED))
+            state.navigate(Screen.PlaylistScreen(p.id))
+        }
+        withContext(Dispatchers.Main) { state.library.saveView(p.id, saved) }
+    }
     withContext(Dispatchers.Main) { state.engine.library().deletePlaylist(longName); state.close() }
     kotlin.system.exitProcess(0)
 }

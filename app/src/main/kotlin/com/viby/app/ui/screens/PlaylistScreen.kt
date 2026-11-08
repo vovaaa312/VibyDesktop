@@ -66,8 +66,10 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.BoxWithConstraints
 import com.viby.app.model.Playlist
+import com.viby.app.model.PlaylistView
 import com.viby.app.model.SortMode
 import com.viby.app.model.Track
+import com.viby.app.model.TrackFilter
 import com.viby.app.state.AppState
 import com.viby.app.ui.ClickKind
 import com.viby.app.ui.ContextMenuBox
@@ -90,12 +92,12 @@ fun PlaylistScreen(state: AppState, playlistId: String) {
         return
     }
     var query by remember(playlistId) { mutableStateOf("") }
-    var sort by remember(playlistId) { mutableStateOf(SortMode.YOUTUBE) }
+    var view by remember(playlistId) { mutableStateOf(state.library.view(playlistId)) }
     var selection by remember(playlistId) { mutableStateOf(emptySet<String>()) }
     var anchor by remember(playlistId) { mutableStateOf<String?>(null) }
     var moveDialog by remember { mutableStateOf<Set<String>?>(null) }
 
-    val visible = state.library.sorted(playlist.tracks, sort).filter {
+    val visible = state.library.visible(playlist.tracks, view).filter {
         query.isBlank() || it.title.contains(query, true) || it.artist.contains(query, true)
     }
     val player = state.player
@@ -148,9 +150,15 @@ fun PlaylistScreen(state: AppState, playlistId: String) {
                 },
                 query = query,
                 onQuery = { query = it },
-                sort = sort,
-                onSort = { sort = it },
+                sort = view.sort,
+                onSort = { view = view.copy(sort = it); state.library.saveView(playlistId, view) },
             )
+        }
+        val counts = TrackFilter.entries.associateWith { f -> playlist.tracks.count(f::matches) }
+        if (counts.getValue(TrackFilter.NOT_DOWNLOADED) > 0 || view.filter != TrackFilter.ALL) {
+            item {
+                FilterChips(view.filter, counts) { view = view.copy(filter = it); state.library.saveView(playlistId, view) }
+            }
         }
         item(key = COLUMNS_KEY) { ColumnsHeader() }
         if (visible.isEmpty()) {
@@ -158,6 +166,11 @@ fun PlaylistScreen(state: AppState, playlistId: String) {
                 Box(Modifier.fillMaxWidth().height(200.dp)) {
                     if (playlist.tracks.isEmpty()) {
                         EmptyHint("Плейлист пуст", "Добавьте сюда треки по ссылке с YouTube.")
+                    } else if (query.isBlank() && view.filter != TrackFilter.ALL) {
+                        EmptyHint(
+                            if (view.filter == TrackFilter.FAILED) "Ошибок загрузки нет" else "Все треки загружены",
+                            "Сейчас показаны только треки «${view.filter.label.lowercase()}».",
+                        )
                     } else {
                         EmptyHint("Ничего не найдено", "Попробуйте другой запрос.")
                     }
@@ -171,7 +184,7 @@ fun PlaylistScreen(state: AppState, playlistId: String) {
                 actions = {
                     val ids = targets.map { it.id }.toSet()
                     buildList {
-                        add(MenuAction("Воспроизвести") { state.playPlaylist(playlist.copy(tracks = visible), track) })
+                        add(MenuAction("Воспроизвести") { state.playPlaylist(playlist, track) })
                         add(MenuAction("Добавить в очередь") { player.enqueue(targets) })
                         add(MenuAction("Вставить после проигрываемого") { player.enqueueNext(targets) })
                         if (track.videoId != null) add(MenuAction("Радио по треку") { state.downloads.radio(track) })
@@ -205,7 +218,7 @@ fun PlaylistScreen(state: AppState, playlistId: String) {
                         if (track.failed != null) {
                             state.showMessage(track.failed)
                         } else {
-                            state.playPlaylist(playlist.copy(tracks = visible), track)
+                            state.playPlaylist(playlist, track)
                         }
                     },
                     onTogglePlay = player::togglePlay,
@@ -378,6 +391,36 @@ private fun SortMenu(sort: SortMode, onSort: (SortMode) -> Unit, showLabel: Bool
                     },
                     onClick = { onSort(mode); open = false },
                 )
+            }
+        }
+    }
+}
+
+/** "Все · Не загружено · С ошибкой": shown only while the playlist has tracks that are not downloaded. */
+@Composable
+private fun FilterChips(filter: TrackFilter, counts: Map<TrackFilter, Int>, onFilter: (TrackFilter) -> Unit) {
+    val compact = LocalCompactPlaylist.current
+    Row(
+        Modifier.fillMaxWidth().padding(start = if (compact) 16.dp else 32.dp, end = 16.dp, bottom = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        TrackFilter.entries.forEach { option ->
+            val count = counts[option] ?: 0
+            if (option != TrackFilter.ALL && count == 0 && option != filter) return@forEach
+            val selected = option == filter
+            Row(
+                Modifier
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(if (selected) VibyColors.Accent else VibyColors.Highlight)
+                    .clickable { onFilter(option) }
+                    .padding(horizontal = 14.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(option.label, style = MaterialTheme.typography.bodyMedium,
+                    color = if (selected) VibyColors.OnAccent else VibyColors.TextPrimary)
+                Spacer(Modifier.width(6.dp))
+                Text(count.toString(), style = MaterialTheme.typography.bodySmall,
+                    color = if (selected) VibyColors.OnAccent.copy(alpha = 0.8f) else VibyColors.TextMuted)
             }
         }
     }

@@ -338,9 +338,15 @@ class PlayerState(private val audio: AudioOutput? = null) {
             val currentId = current?.id
             val newIndex = playable.indexOfFirst { it.id == currentId }
             if (newIndex < 0) return // the playing track left the playlist: keep playing it
+            // a shuffled queue keeps its order: only the indices move with the new list
+            val shuffledIds = if (shuffle && shuffleOrder.size == items.size) shuffleOrder.map { items[it].id } else null
             items = playable
             currentIndex = newIndex
-            shuffleOrder = if (shuffle) shuffledStartingAt(newIndex) else IntArray(0)
+            shuffleOrder = when {
+                !shuffle -> IntArray(0)
+                shuffledIds == null -> shuffledStartingAt(newIndex)
+                else -> remapOrder(shuffledIds, playable)
+            }
             onStateChanged()
         } else {
             // same tracks, refreshed metadata (titles, covers)
@@ -430,6 +436,13 @@ class PlayerState(private val audio: AudioOutput? = null) {
 
     private fun applyVolume() {
         audio?.setVolume(if (mutedState) 0f else volumeState)
+    }
+
+    /** [orderIds] as indices into [tracks]; tracks that were not in the order go to the end. */
+    private fun remapOrder(orderIds: List<String>, tracks: List<Track>): IntArray {
+        val index = tracks.withIndex().associate { (i, t) -> t.id to i }
+        val kept = orderIds.mapNotNull(index::get).distinct()
+        return (kept + tracks.indices.filter { it !in kept.toSet() }).toIntArray()
     }
 
     private fun shuffledStartingAt(start: Int): IntArray {
