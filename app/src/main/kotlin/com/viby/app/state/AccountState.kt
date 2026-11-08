@@ -44,7 +44,7 @@ class AccountState(private val app: AppState) {
         app.scope.launch {
             runCatching { withContext(Dispatchers.IO) { account.channel() } }
                 .onSuccess { channel = it }
-                .onFailure { app.showMessage("Не удалось получить данные канала YouTube: ${it.message}") }
+                .onFailure { app.showError(it, "Не удалось получить данные канала YouTube") }
         }
     }
 
@@ -142,7 +142,7 @@ class AccountState(private val app: AppState) {
             try {
                 queue.withLock { withContext(Dispatchers.IO) { block() } }
             } catch (e: Exception) {
-                app.showMessage(e.message ?: e.javaClass.simpleName)
+                app.showError(e)
             } finally {
                 running--
                 busy = running > 0

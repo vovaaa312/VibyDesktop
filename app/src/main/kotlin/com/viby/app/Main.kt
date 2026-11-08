@@ -71,6 +71,19 @@ import androidx.compose.ui.graphics.toComposeImageBitmap
 import org.jetbrains.skia.Image
 import java.awt.Dimension
 import kotlin.system.exitProcess
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
+import java.awt.Toolkit
+import java.awt.datatransfer.StringSelection
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
@@ -228,6 +241,7 @@ fun App(state: AppState) {
         Toast(state, Modifier.align(Alignment.BottomCenter).padding(bottom = 100.dp))
         UpdateDialog(state)
         PromptDialog(state)
+        ErrorDetailsDialog(state)
     }
 }
 
@@ -340,19 +354,74 @@ private fun EngineBanner(state: AppState) {
     }
 }
 
+/**
+ * Snackbar: at most three lines, closable, disappears after a few seconds unless hovered.
+ * Errors keep their raw output behind "Подробнее" instead of filling the window.
+ */
 @Composable
 private fun Toast(state: AppState, modifier: Modifier) {
-    val message = state.message ?: return
-    LaunchedEffect(message) {
-        delay(3_000L + message.length * 40L)
+    val notice = state.message ?: return
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    LaunchedEffect(notice, hovered) {
+        if (hovered) return@LaunchedEffect
+        delay(if (notice.details != null) 8_000L else (2_500L + notice.text.length * 40L).coerceAtMost(7_000L))
         state.consumeMessage()
     }
-    Box(
+    Row(
         modifier
+            .widthIn(max = 640.dp)
+            .padding(horizontal = 16.dp)
+            .shadow(8.dp, RoundedCornerShape(8.dp))
             .clip(RoundedCornerShape(8.dp))
             .background(VibyColors.TextPrimary)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .hoverable(interaction)
+            .padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(message, color = Color.Black, style = MaterialTheme.typography.bodyMedium)
+        Text(
+            notice.text,
+            color = Color.Black,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false).padding(vertical = 4.dp),
+        )
+        notice.details?.let { details ->
+            TextButton(onClick = {
+                state.errorDetails = details
+                state.consumeMessage()
+            }) { Text("Подробнее", color = VibyColors.Accent) }
+        }
+        IconAction(Icons.Rounded.Close, "Закрыть", state::consumeMessage, tint = Color.Black.copy(alpha = 0.6f))
     }
+}
+
+/** Full error output from a toast: selectable, scrollable and copyable for a bug report. */
+@Composable
+private fun ErrorDetailsDialog(state: AppState) {
+    val details = state.errorDetails ?: return
+    AlertDialog(
+        onDismissRequest = { state.errorDetails = null },
+        containerColor = VibyColors.Elevated,
+        title = { Text("Подробности ошибки") },
+        text = {
+            SelectionContainer {
+                Text(
+                    details,
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    color = VibyColors.TextSecondary,
+                    modifier = Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()),
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = { state.errorDetails = null }) { Text("Закрыть") } },
+        dismissButton = {
+            TextButton(onClick = {
+                Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(details), null)
+                state.errorDetails = null
+                state.showMessage("Скопировано")
+            }) { Text("Копировать") }
+        },
+    )
 }

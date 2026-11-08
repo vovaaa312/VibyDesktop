@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.sp
 import com.viby.app.model.Track
 import com.viby.app.state.AppState
 import com.viby.app.state.SidePanel
+import com.viby.app.state.ErrorText
 import com.viby.app.theme.VibyColors
 import kotlin.math.roundToInt
 import androidx.compose.ui.zIndex
@@ -284,7 +285,7 @@ private fun loadLyrics(state: AppState, track: Track): LyricsResult = try {
     )
 } catch (e: Throwable) {
     // lyrics are optional: no failure here (network, YouTube changes, linkage errors) may close the app
-    LyricsResult.Missing("Не удалось загрузить текст: ${e.message ?: e.javaClass.simpleName}")
+    LyricsResult.Missing("Не удалось загрузить текст: ${ErrorText.humanize(e.message ?: e.javaClass.simpleName)}")
 }
 
 @Composable

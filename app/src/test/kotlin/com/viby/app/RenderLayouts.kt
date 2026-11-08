@@ -84,6 +84,17 @@ fun main(args: Array<String>): Unit = runBlocking {
         }
     }
     withContext(Dispatchers.Main) { state.setTheme(AccentTheme.VIBY) }
+    // the ffmpeg 403 output that used to cover half of the window
+    val forbidden = "[in#0 @ 00000246939cfb40] Error opening input: Server returned 403 Forbidden (access denied)\n" +
+        "Error opening input file https://rr2---sn-jxnoxu-2gbl.googlevideo.com/videoplayback?" + "expire=1793806357&ei=x".repeat(40) +
+        "\nError opening input files: Server returned 403 Forbidden (access denied)"
+    shot("toast-error", 1360, 860) {
+        playlist?.let { state.navigate(Screen.PlaylistScreen(it.id)) }
+        state.showError(forbidden, "Не удалось воспроизвести трек")
+    }
+    shot("toast-long-info", 1000, 600) { state.showMessage("Длинное сообщение. ".repeat(30)) }
+    shot("error-details", 1360, 860) { state.consumeMessage(); state.errorDetails = forbidden }
+    withContext(Dispatchers.Main) { state.errorDetails = null }
     withContext(Dispatchers.Main) { state.engine.library().deletePlaylist(longName); state.close() }
     kotlin.system.exitProcess(0)
 }

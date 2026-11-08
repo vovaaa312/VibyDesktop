@@ -40,7 +40,7 @@ class UpdateState(private val app: AppState) {
                 if (update != null) prompt = true
                 else if (manual) app.showMessage("Установлена последняя версия ($version)")
             } catch (e: Exception) {
-                if (manual) app.showMessage("Не удалось проверить обновления: ${e.message}")
+                if (manual) app.showError(e, "Не удалось проверить обновления")
             } finally {
                 checking = false
             }
@@ -65,7 +65,7 @@ class UpdateState(private val app: AppState) {
                 exitProcess(0)
             } catch (e: Exception) {
                 downloadProgress = null
-                app.showMessage("Обновление не установлено: ${e.message}")
+                app.showError(e, "Обновление не установлено")
             }
         }
     }

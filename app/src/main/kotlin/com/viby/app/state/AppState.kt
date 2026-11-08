@@ -41,6 +41,7 @@ sealed interface Screen {
 enum class SidePanel { NONE, QUEUE, LYRICS }
 
 private const val THEME_KEY = "theme"
+private const val STREAM_RETRY_INTERVAL_MS = 30_000L
 
 /** Formats ffmpeg decodes that the import dialog offers. */
 private val AUDIO_EXTENSIONS = listOf("mp3", "m4a", "aac", "opus", "ogg", "flac", "wav", "webm", "wma")
@@ -48,6 +49,9 @@ private val AUDIO_EXTENSIONS = listOf("mp3", "m4a", "aac", "opus", "ogg", "flac"
 class PromptAction(val label: String, val run: () -> Unit)
 
 class Prompt(val title: String, val text: String?, val actions: List<PromptAction>)
+
+/** Toast text; [details] is the raw error output, opened by "Подробнее". */
+class Notice(val text: String, val details: String? = null)
 
 /** Root UI state on top of [VibyEngine]. Mutations run on IO; state is published on the Swing thread. */
 class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
@@ -77,8 +81,11 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
         private set
 
     /** Transient snackbar text; consumed by the root composable. */
-    var message by mutableStateOf<String?>(null)
+    var message by mutableStateOf<Notice?>(null)
         private set
+
+    /** Raw error text shown in a closable dialog with a copy button. */
+    var errorDetails by mutableStateOf<String?>(null)
 
     init {
         VibyColors.theme = AccentTheme.entries.firstOrNull { it.name == settings.getString(THEME_KEY, "") }
@@ -87,7 +94,7 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
         engine.library().addListener { library.requestReload() }
         engine.downloads().addListener(downloads::onJobsChanged)
         library.requestReload()
-        player.loader = ::loadTrack
+        player.loader = { track, startMs, paused -> loadTrack(track, startMs, paused) }
         player.onStateChanged = ::schedulePlaybackSave
         engine.ytDlp().setCookieFailureListener {
             scope.launch {
@@ -107,7 +114,8 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
 
             override fun onError(message: String) {
                 scope.launch {
-                    showMessage(message)
+                    if (retryStream()) return@launch
+                    showError(message, "Не удалось воспроизвести трек")
                     player.onFailed()
                 }
             }
@@ -116,15 +124,20 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
 
     private var loadToken = 0
     private var cookieWarningShown = false
+    /** The current source is an online stream (its URL expires and may answer 403). */
+    private var streaming = false
+    private var streamRetriedAt = 0L
 
     /** Plays the local file, or resolves an online stream for tracks that are not downloaded yet. */
-    private fun loadTrack(queued: Track, startMs: Long, paused: Boolean) {
+    private fun loadTrack(queued: Track, startMs: Long, paused: Boolean, retry: Boolean = false) {
         val token = ++loadToken
         val audio = engine.audio()
+        if (!retry) streamRetriedAt = 0L
         // the queue holds snapshots; the track may have finished downloading since
         val track = library.findTrack(queued.id) ?: queued
         val file = track.filePath
         player.isLoading = false
+        streaming = false
         if (file != null && File(file).isFile) {
             audio.play(file, startMs, paused)
             return
@@ -137,19 +150,44 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
         }
         audio.stop()
         player.isLoading = true
-        showMessage("Трек ещё не скачан — играю онлайн и скачиваю его первым")
+        streaming = true
+        if (!retry) showMessage("Трек ещё не скачан — играю онлайн и скачиваю его первым")
         // Android: a pending track that starts playing jumps to the front of the download queue
         if (track.videoId != null && track.playlistName.isNotEmpty()) downloads.prioritize(track)
         scope.launch {
             val url = runCatching { withContext(Dispatchers.IO) { engine.resolveStreamUrl(source) } }
             if (token != loadToken) return@launch
             player.isLoading = false
-            url.onSuccess { audio.play(it, startMs, paused) }
+            url.onSuccess { audio.play(debugBreakStream(it, retry), startMs, paused) }
                 .onFailure {
-                    showMessage("Не удалось получить поток: ${it.message ?: it.javaClass.simpleName}")
+                    showError(it, "Не удалось получить поток")
                     player.onFailed()
                 }
         }
+    }
+
+    /**
+     * Manual test of the 403 handling: VIBY_DEBUG_STREAM_403=once spoils the first stream URL of a
+     * track (the retry recovers), =always spoils every URL (the error toast appears).
+     */
+    private fun debugBreakStream(url: String, retry: Boolean): String = when (System.getenv("VIBY_DEBUG_STREAM_403")) {
+        "always" -> url.replace("sig=", "sig=x")
+        "once" -> if (retry) url else url.replace("sig=", "sig=x")
+        else -> url
+    }
+
+    /**
+     * A stream URL from yt-dlp expires and YouTube may refuse it (403), e.g. on a seek after a
+     * while. Plays the downloaded file if it is ready now, else resolves a fresh URL; a second
+     * failure right after the retry is reported instead of looping.
+     */
+    private fun retryStream(): Boolean {
+        val track = player.current ?: return false
+        val now = System.currentTimeMillis()
+        if (!streaming || now - streamRetriedAt < STREAM_RETRY_INTERVAL_MS) return false
+        streamRetriedAt = now
+        loadTrack(track, player.positionMs, !player.isPlaying, retry = true)
+        return true
     }
 
     fun start() = engine.start()
@@ -166,8 +204,18 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
     }
 
     fun showMessage(text: String) {
-        message = text
+        message = Notice(text)
     }
+
+    /** A short readable error in the toast; the raw text stays under "Подробнее". */
+    fun showError(raw: String?, context: String? = null) {
+        val summary = ErrorText.humanize(raw)
+        val details = raw?.trim()?.takeIf { it.isNotEmpty() && it != summary }
+        message = Notice(context?.let { "$it: $summary" } ?: summary, details)
+    }
+
+    fun showError(error: Throwable, context: String? = null) =
+        showError(error.message ?: error.javaClass.simpleName, context)
 
     /** Question dialog (Android MaterialAlertDialogBuilder): one action = confirm, several = a list. */
     fun ask(title: String, text: String?, vararg actions: PromptAction) {
@@ -333,7 +381,7 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
             try {
                 withContext(Dispatchers.IO) { block() }
             } catch (e: Exception) {
-                showMessage(e.message ?: e.javaClass.simpleName)
+                showError(e)
             }
         }
     }
