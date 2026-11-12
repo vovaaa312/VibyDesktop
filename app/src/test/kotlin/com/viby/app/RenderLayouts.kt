@@ -111,6 +111,31 @@ fun main(args: Array<String>): Unit = runBlocking {
     }
     shot("search", 1360, 860) { state.searchQuery = "mol"; state.navigate(Screen.Search) }
     shot("search-empty", 1000, 600) { state.searchQuery = ""; state.navigate(Screen.Search) }
+    // stage 4: library sections, favourites, the folder change dialog
+    for (tab in com.viby.app.state.LibraryTab.entries) {
+        shot("library-" + tab.name.lowercase(), 1360, 860) {
+            state.libraryTab = tab
+            state.navigate(Screen.Library)
+            state.sidePanel = SidePanel.NONE
+        }
+    }
+    val liked = playlist?.tracks.orEmpty().take(3)
+    shot("favorites", 1360, 860) {
+        state.favorites.set(liked, true)
+        state.navigate(Screen.Collection(com.viby.app.state.CollectionRef.Favorites))
+    }
+    shot("favorites-playlist", 1360, 860) { playlist?.let { state.navigate(Screen.PlaylistScreen(it.id)) } }
+    withContext(Dispatchers.Main) { state.favorites.set(liked, false) }
+    shot("favorites-empty", 1000, 600) { state.navigate(Screen.Collection(com.viby.app.state.CollectionRef.Favorites)) }
+    val elsewhere = File(out, "new-music-folder").apply { mkdirs() }
+    shot("folder-change", 1360, 860, interact = {
+        while (state.prompt == null && state.storage.busy != null) delay(100)
+        delay(200)
+    }) {
+        state.navigate(Screen.Settings)
+        state.storage.changeMusicFolder(elsewhere.toPath())
+    }
+    withContext(Dispatchers.Main) { state.answer(null) }
     withContext(Dispatchers.Main) { state.engine.library().deletePlaylist(longName); state.close() }
     kotlin.system.exitProcess(0)
 }

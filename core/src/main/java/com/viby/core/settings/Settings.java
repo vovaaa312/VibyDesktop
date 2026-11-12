@@ -15,6 +15,8 @@ public final class Settings {
 
     public static final String FORMAT_MP3 = "mp3";
     public static final String FORMAT_M4A = "m4a";
+    public static final String QUALITY_BEST = "0";
+    public static final java.util.List<String> MP3_QUALITIES = java.util.List.of(QUALITY_BEST, "320K", "192K", "128K");
 
     private final Path file;
     private final Path defaultMusicDirectory;
@@ -53,6 +55,20 @@ public final class Settings {
 
     public synchronized void setAudioFormat(String format) {
         values.put("audioFormat", format);
+        save();
+    }
+
+    /**
+     * yt-dlp --audio-quality for MP3: "0" is the best variable bitrate (~245 kbit/s), the rest
+     * are constant bitrates. M4A keeps the source stream and has no such choice.
+     */
+    public synchronized String audioQuality() {
+        String quality = values.optString("audioQuality", QUALITY_BEST);
+        return MP3_QUALITIES.contains(quality) ? quality : QUALITY_BEST;
+    }
+
+    public synchronized void setAudioQuality(String quality) {
+        values.put("audioQuality", quality);
         save();
     }
 

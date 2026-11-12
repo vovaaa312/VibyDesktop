@@ -111,6 +111,8 @@ fun SearchScreen(state: AppState) {
                             add(MenuAction("Добавить в очередь") { player.enqueue(listOf(track)) })
                             add(MenuAction("Вставить после проигрываемого") { player.enqueueNext(listOf(track)) })
                             if (track.videoId != null) add(MenuAction("Радио по треку") { state.downloads.radio(track) })
+                            val liked = state.favorites.isFavorite(track)
+                            add(MenuAction(if (liked) "Убрать из избранного" else "В избранное") { state.favorites.toggle(track) })
                             hit.playlists.forEach { playlist ->
                                 add(MenuAction("Открыть «${playlist.name}»") {
                                     state.navigate(Screen.PlaylistScreen(playlist.id))
@@ -134,6 +136,8 @@ fun SearchScreen(state: AppState) {
                         modifier = Modifier.padding(horizontal = 16.dp),
                         showAdded = false,
                         context = hit.playlists.joinToString(", ") { it.name },
+                        favorite = state.favorites.isFavorite(track),
+                        onFavorite = { state.favorites.toggle(track) },
                     )
                 }
             }

@@ -41,7 +41,10 @@ public final class LibraryBackup {
     static final String ZIP_DOCUMENT = "viby-library.json";
     static final String ZIP_MUSIC = "music/";
     /** Settings that describe taste, not this machine (no folders, cookies or accounts). */
-    static final List<String> PORTABLE_SETTINGS = List.of("audioFormat", "theme", "equalizer");
+    static final List<String> PORTABLE_SETTINGS = List.of("audioFormat", "audioQuality", "theme", "equalizer",
+            "favorites", "playlistViews");
+    /** Restored into what is already there instead of replacing it, like the playlists. */
+    static final List<String> MERGED_SETTINGS = List.of("favorites", "playlistViews");
     private static final java.util.regex.Pattern FORBIDDEN =
             java.util.regex.Pattern.compile("[\\\\:*?\"<>|\\x00-\\x1f]|[. ]$");
 
@@ -322,6 +325,14 @@ public final class LibraryBackup {
         for (String key : PORTABLE_SETTINGS) {
             Object value = json.opt(key);
             if (value instanceof JSONObject object) {
+                if (MERGED_SETTINGS.contains(key)) {
+                    JSONObject merged = new JSONObject(object.toString());
+                    JSONObject current = settings.getJson(key);
+                    for (String name : current.keySet()) {
+                        merged.put(name, current.get(name));
+                    }
+                    object = merged;
+                }
                 settings.putJson(key, object);
             } else if (value instanceof String text) {
                 settings.putString(key, text);

@@ -56,8 +56,14 @@ class UpdateState(private val app: AppState) {
         app.scope.launch {
             try {
                 val installer = withContext(Dispatchers.IO) {
+                    // ~12 000 network chunks for a 110 MB installer: post to the UI only when the percent changes
+                    var shown = -1
                     updater.download(update) { done, total ->
-                        if (total > 0) app.scope.launch { downloadProgress = done.toFloat() / total }
+                        val percent = if (total > 0) (done * 100 / total).toInt() else -1
+                        if (percent > shown) {
+                            shown = percent
+                            app.scope.launch { downloadProgress = percent / 100f }
+                        }
                     }
                 }
                 withContext(Dispatchers.IO) { updater.launchInstaller(installer) }

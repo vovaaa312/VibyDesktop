@@ -24,6 +24,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AddLink
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.automirrored.rounded.QueueMusic
+import androidx.compose.ui.graphics.Brush
+import com.viby.app.state.CollectionRef
 import androidx.compose.material.icons.rounded.FileOpen
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Home
@@ -87,6 +91,12 @@ private fun SidebarContent(state: AppState) {
             Column(Modifier.padding(vertical = 8.dp)) {
                 NavItem(Icons.Rounded.Home, "Главная", state.screen == Screen.Home) { state.navigate(Screen.Home) }
                 NavItem(Icons.Rounded.Search, "Поиск", state.screen == Screen.Search) { state.navigate(Screen.Search) }
+                NavItem(
+                    Icons.Rounded.LibraryMusic, "Медиатека",
+                    state.screen == Screen.Library || (state.screen as? Screen.Collection)?.ref.let {
+                        it != null && it != CollectionRef.Favorites
+                    },
+                ) { state.navigate(Screen.Library) }
                 NavItem(Icons.Rounded.AddLink, "Добавить с YouTube", state.screen == Screen.Add) {
                     state.navigate(Screen.Add)
                 }
@@ -107,14 +117,22 @@ private fun SidebarContent(state: AppState) {
                     Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 12.dp, bottom = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(Icons.Rounded.LibraryMusic, null, tint = VibyColors.TextSecondary)
+                    Icon(Icons.AutoMirrored.Rounded.QueueMusic, null, tint = VibyColors.TextSecondary)
                     Spacer(Modifier.width(12.dp))
-                    Text("Медиатека", style = MaterialTheme.typography.titleMedium,
+                    Text("Плейлисты", style = MaterialTheme.typography.titleMedium,
                         color = VibyColors.TextSecondary, modifier = Modifier.weight(1f))
                     IconAction(Icons.Rounded.FileOpen, "Импорт плейлиста из файла (JSON Viby или резервная копия)", { state.storage.restoreLibrary("Импорт плейлиста") })
                     IconAction(Icons.Rounded.Add, "Создать плейлист", { dialog = PlaylistDialog.Create })
                 }
                 ScrollLazyColumn(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+                    item(key = CollectionRef.Favorites.id) {
+                        val favorites = Screen.Collection(CollectionRef.Favorites)
+                        FavoritesItem(
+                            count = state.library.index.tracks.count { it.track.key in state.favorites.liked },
+                            selected = state.screen == favorites,
+                            playing = state.player.contextPlaylistId == CollectionRef.Favorites.id && state.player.isPlaying,
+                        ) { state.navigate(favorites) }
+                    }
                     items(state.library.playlists, key = { it.id }) { playlist ->
                         ContextMenuBox(header = playlist.name, actions = {
                             buildList {
@@ -325,6 +343,45 @@ private fun NavItem(
             Box(
                 Modifier.clip(CircleShape).background(VibyColors.Accent).padding(horizontal = 7.dp, vertical = 2.dp),
             ) { Text("$badge", style = MaterialTheme.typography.labelMedium, color = Color.White) }
+        }
+    }
+}
+
+/** "Избранное" pinned above the playlists, like a playlist of its own. */
+@Composable
+private fun FavoritesItem(count: Int, selected: Boolean, playing: Boolean, onClick: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .background(
+                when {
+                    selected -> VibyColors.Selected
+                    hovered -> VibyColors.Hover
+                    else -> Color.Transparent
+                }
+            )
+            .hoverable(interaction)
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .padding(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(48.dp).clip(RoundedCornerShape(4.dp))
+                .background(Brush.linearGradient(listOf(VibyColors.Accent, VibyColors.AccentBright))),
+            contentAlignment = Alignment.Center,
+        ) { Icon(Icons.Rounded.Favorite, null, tint = Color.White, modifier = Modifier.size(22.dp)) }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text("Избранное", style = MaterialTheme.typography.bodyLarge,
+                color = if (playing) VibyColors.AccentBright else VibyColors.TextPrimary, maxLines = 1)
+            Text("Подборка • ${tracksLabel(count)}", style = MaterialTheme.typography.bodySmall,
+                color = VibyColors.TextSecondary, maxLines = 1)
+        }
+        if (playing) {
+            Icon(Icons.AutoMirrored.Rounded.VolumeUp, null, tint = VibyColors.AccentBright, modifier = Modifier.size(18.dp))
         }
     }
 }

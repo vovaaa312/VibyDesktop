@@ -24,7 +24,13 @@ public final class AudioDownloader {
     private final Backend backend;
 
     public static AudioDownloader create(YtDlp ytDlp, YoutubeExtractor youtubeExtractor) {
-        return new AudioDownloader(youtubeExtractor, new MediaConverter(),
+        return create(ytDlp, youtubeExtractor, () -> "0");
+    }
+
+    /** @param mp3Quality yt-dlp --audio-quality for MP3 downloads, read for every track */
+    public static AudioDownloader create(YtDlp ytDlp, YoutubeExtractor youtubeExtractor,
+                                         java.util.function.Supplier<String> mp3Quality) {
+        return new AudioDownloader(youtubeExtractor, new MediaConverter(mp3Quality),
                 (request, processId, listener) -> ytDlp.execute(
                         request, processId, listener::onProgress));
     }

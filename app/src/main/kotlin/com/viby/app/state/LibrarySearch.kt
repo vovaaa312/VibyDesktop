@@ -36,7 +36,7 @@ object LibrarySearch {
         for (playlist in playlists) {
             for (track in playlist.tracks) {
                 val text = normalize("${track.title} ${track.artist}")
-                if (words.all(text::contains)) hits.getOrPut(identity(track)) { mutableListOf() } += track to playlist
+                if (words.all(text::contains)) hits.getOrPut(track.key) { mutableListOf() } += track to playlist
             }
         }
         val tracks = hits.values
@@ -56,10 +56,6 @@ object LibrarySearch {
         title.contains(" $phrase") || artist.contains(" $phrase") -> 2
         else -> 3
     }
-
-    /** Copies of one song share the video ID, or the file for local imports. */
-    private fun identity(track: Track): String =
-        track.videoId?.let { "yt:$it" } ?: track.filePath?.let { "file:${it.lowercase()}" } ?: "id:${track.id}"
 
     internal fun normalize(text: String): String =
         text.lowercase().replace('ё', 'е').replace(Regex("\\s+"), " ").trim()

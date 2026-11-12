@@ -259,6 +259,132 @@ class LibraryDataSafetyTest {
         return opened;
     }
 
+    // ---------------------------------------------------------------- changing the music folder
+
+    @Test
+    void changingTheFolderMovesTheLibraryAndKeepsPlaylistFolders() throws Exception {
+        Path song = file("Drive/Song.mp3");
+        Path shared = file("Drive/Shared.mp3");
+        Track a = library.insert(track("Drive", "a", song.toString()));
+        Track b = library.insert(track("Drive", "b", shared.toString()));
+        // "send to playlist" shares one file between two playlists
+        Track c = library.insert(track("Night", "b", shared.toString()));
+        Track elsewhere = library.insert(track("Drive", "x", Files.writeString(temp.resolve("other.mp3"), "x").toString()));
+        Path target = temp.resolve("NewMusic");
+
+        LibraryMover mover = new LibraryMover(library);
+        assertEquals(2, mover.plan(music, target).files());
+        LibraryMover.Result result = mover.move(music, target, (done, total) -> { });
+
+        assertEquals(2, result.moved());
+        assertEquals(0, result.failed());
+        assertEquals(target.resolve("Drive/Song.mp3").toString(), library.track(a.id).filePath);
+        assertEquals(target.resolve("Drive/Shared.mp3").toString(), library.track(b.id).filePath);
+        assertEquals(library.track(b.id).filePath, library.track(c.id).filePath);
+        assertTrue(Files.isRegularFile(target.resolve("Drive/Song.mp3")));
+        assertFalse(Files.exists(song));
+        // the emptied playlist folder and music folder are removed, files outside are untouched
+        assertFalse(Files.exists(music));
+        assertEquals(temp.resolve("other.mp3").toString(), library.track(elsewhere.id).filePath);
+    }
+
+    /** D:\Music → D:\Music\Viby: what already lies in the new folder stays where it is. */
+    @Test
+    void movingIntoASubfolderLeavesFilesThatAreAlreadyThere() throws Exception {
+        Track outer = library.insert(track("Drive", "a", file("Drive/Song.mp3").toString()));
+        Track inner = library.insert(track("Night", "b", file("Viby/Night/Moon.mp3").toString()));
+        Path target = music.resolve("Viby");
+
+        LibraryMover mover = new LibraryMover(library);
+        assertEquals(1, mover.plan(music, target).files());
+        mover.move(music, target, (done, total) -> { });
+
+        assertEquals(target.resolve("Drive/Song.mp3").toString(), library.track(outer.id).filePath);
+        assertEquals(target.resolve("Night/Moon.mp3").toString(), library.track(inner.id).filePath);
+        assertTrue(Files.isRegularFile(target.resolve("Night/Moon.mp3")));
+    }
+
+    @Test
+    void moveKeepsADifferentFileThatAlreadyHasTheName() throws Exception {
+        Track track = library.insert(track("Drive", "a", file("Drive/Song.mp3").toString()));
+        Path target = temp.resolve("NewMusic");
+        Files.createDirectories(target.resolve("Drive"));
+        Files.writeString(target.resolve("Drive/Song.mp3"), "another recording with this name");
+
+        new LibraryMover(library).move(music, target, (done, total) -> { });
+
+        assertEquals(target.resolve("Drive/Song (2).mp3").toString(), library.track(track.id).filePath);
+        assertEquals("another recording with this name", Files.readString(target.resolve("Drive/Song.mp3")));
+    }
+
+    @Test
+    void moveReusesTheSameFileCopiedByHand() throws Exception {
+        Path old = file("Drive/Song.mp3");
+        Track track = library.insert(track("Drive", "a", old.toString()));
+        Path target = temp.resolve("NewMusic");
+        Files.createDirectories(target.resolve("Drive"));
+        Files.copy(old, target.resolve("Drive/Song.mp3"));
+
+        LibraryMover.Result result = new LibraryMover(library).move(music, target, (done, total) -> { });
+
+        assertEquals(1, result.moved());
+        assertEquals(target.resolve("Drive/Song.mp3").toString(), library.track(track.id).filePath);
+        assertFalse(Files.exists(old));
+        assertFalse(Files.exists(target.resolve("Drive/Song (2).mp3")));
+    }
+
+    /** The user copied the music to the new folder and then pointed Viby at it. */
+    @Test
+    void scanAfterFolderChangeSwitchesToTheCopiesInsteadOfAddingThemTwice() throws Exception {
+        Path oldFile = Files.createDirectories(temp.resolve("OldMusic/Drive")).resolve("Song.mp3");
+        Files.writeString(oldFile, "audio Drive/Song.mp3");
+        Track track = library.insert(track("Drive", "a", oldFile.toString()));
+        Path copy = file("Drive/Song.mp3");
+
+        LibraryScanner.Result result = scanner().scan(true, true, (done, total) -> { });
+
+        assertEquals(1, result.relinked());
+        assertEquals(0, result.adopted());
+        assertEquals(copy.toAbsolutePath().toString(), library.track(track.id).filePath);
+        assertEquals(1, library.tracks("Drive").size());
+    }
+
+
+    // ---------------------------------------------------------------- albums
+
+    @Test
+    void albumsAreReadOnceAndAgainOnlyWhenTheFileChanges() throws Exception {
+        Path song = file("Drive/Song.mp3");
+        Path plain = file("Drive/Plain.mp3");
+        tags.put("Song.mp3", new AudioProbe.Info("Song", "Artist", 1000, "a", "Night Drive"));
+        Path cache = temp.resolve("albums.json");
+        AudioProbe.Reader reader = f -> {
+            probes++;
+            return tags.getOrDefault(f.getName(), AudioProbe.Info.EMPTY);
+        };
+        List<String> files = List.of(song.toString(), plain.toString(), temp.resolve("gone.mp3").toString());
+
+        AlbumIndex index = new AlbumIndex(cache, reader);
+        assertEquals(2, index.refresh(files, (done, total) -> { }));
+        assertEquals(Map.of(song.toString(), "Night Drive"), index.albums());
+        assertEquals(0, index.refresh(files, (done, total) -> { }));
+
+        // a restart reads the cache, a changed file is probed again
+        AlbumIndex restarted = new AlbumIndex(cache, reader);
+        probes = 0;
+        assertEquals(0, restarted.refresh(files, (done, total) -> { }));
+        assertEquals("Night Drive", restarted.albumOf(song.toString()));
+        Files.writeString(song, "re-downloaded, another size");
+        tags.put("Song.mp3", new AudioProbe.Info("Song", "Artist", 1000, "a", "Deluxe"));
+        assertEquals(1, restarted.refresh(files, (done, total) -> { }));
+        assertEquals("Deluxe", restarted.albumOf(song.toString()));
+        assertEquals(1, probes);
+
+        // files that left the library are forgotten
+        restarted.refresh(List.of(plain.toString()), (done, total) -> { });
+        assertNull(restarted.albumOf(song.toString()));
+    }
+
     private Path file(String relative) throws IOException {
         Path file = music.resolve(relative);
         Files.createDirectories(file.getParent());

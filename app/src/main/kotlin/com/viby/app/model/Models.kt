@@ -19,8 +19,22 @@ data class Track(
     val youtubePosition: Int? = null,
     /** User-safe failure text when the download failed. */
     val failed: String? = null,
+    /** Downloaded, but the file is not on disk any more (folder moved, deleted, drive unplugged). */
+    val fileMissing: Boolean = false,
 ) {
     val isDownloaded: Boolean get() = downloadProgress == null
+
+    /**
+     * The song behind this row: copies in several playlists share it, and it survives moving
+     * the music folder (favourites and the listening history are stored by it).
+     */
+    val key: String
+        get() = videoId?.let { "yt:$it" }
+            ?: filePath?.let { path ->
+                val file = java.io.File(path)
+                "file:${file.parentFile?.name.orEmpty()}/${file.name}".lowercase()
+            }
+            ?: "id:$id"
 }
 
 data class Playlist(
@@ -54,12 +68,14 @@ enum class SortMode(val label: String) {
 enum class TrackFilter(val label: String) {
     ALL("Все треки"),
     NOT_DOWNLOADED("Не загружено"),
-    FAILED("С ошибкой");
+    FAILED("С ошибкой"),
+    MISSING("Нет файла");
 
     fun matches(track: Track): Boolean = when (this) {
         ALL -> true
         NOT_DOWNLOADED -> !track.isDownloaded
         FAILED -> track.failed != null
+        MISSING -> track.fileMissing
     }
 }
 

@@ -110,6 +110,12 @@ class PlayerState(private val audio: AudioOutput? = null) {
         playItem(currentIndex)
     }
 
+    /** A library section (favourites, an artist…): its list always replaces the queue as shown. */
+    fun replaceQueue(tracks: List<Track>, start: Track, contextId: String) {
+        load(tracks, tracks.indexOfFirst { it.id == start.id }.coerceAtLeast(0), contextId, customized = false)
+        playItem(currentIndex)
+    }
+
     /** Android playResolvedStream: a pending track plays among the local ones; the queue is custom. */
     fun playWithPending(tracks: List<Track>, start: Track, playlistId: String?) {
         load(tracks, tracks.indexOfFirst { it.id == start.id }.coerceAtLeast(0), playlistId, customized = true)
@@ -124,14 +130,39 @@ class PlayerState(private val audio: AudioOutput? = null) {
         shuffleOrder = if (shuffle) shuffledStartingAt(startIndex) else IntArray(0)
     }
 
-    /** Plays the item at [itemIndex] from the start. */
-    private fun playItem(itemIndex: Int) {
+    /** Loads the item at [itemIndex] from the start; [paused] leaves it ready without playing. */
+    private fun playItem(itemIndex: Int, paused: Boolean = false) {
         if (itemIndex !in items.indices) return
         currentIndex = itemIndex
         positionMs = 0
-        isPlaying = true
-        loader(items[itemIndex], 0, false)
+        isPlaying = !paused
+        loader(items[itemIndex], 0, paused)
         onStateChanged()
+    }
+
+    /** Sleep timer: stops the sound and keeps the place in the queue. */
+    fun pause() {
+        if (isPlaying) togglePlay()
+    }
+
+    /**
+     * Sleep timer "до конца трека": the track ended, so the next one is loaded but not started;
+     * pressing play tomorrow continues the queue.
+     */
+    fun finishAndStop() {
+        val order = playbackOrder
+        val position = order.indexOf(currentIndex)
+        when {
+            repeat == RepeatMode.ONE -> playItem(currentIndex, paused = true)
+            position + 1 < order.size -> playItem(order[position + 1], paused = true)
+            repeat != RepeatMode.OFF && order.isNotEmpty() -> playItem(order[0], paused = true)
+            else -> {
+                isPlaying = false
+                positionMs = 0
+                audio?.stop()
+                onStateChanged()
+            }
+        }
     }
 
     /** Jump from the queue panel; [queuePosition] is a position in [queue]. */
@@ -352,6 +383,13 @@ class PlayerState(private val audio: AudioOutput? = null) {
             // same tracks, refreshed metadata (titles, covers)
             items = playable
         }
+    }
+
+    /** The loaded playlist was renamed: the queue keeps following it under the new name. */
+    fun renameContext(from: String, to: String) {
+        if (contextPlaylistId != from) return
+        contextPlaylistId = to
+        onStateChanged()
     }
 
     /** Android clearIfLoaded: the loaded playlist was deleted. */

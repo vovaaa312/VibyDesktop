@@ -53,8 +53,9 @@ import javax.swing.filechooser.FileNameExtensionFilter
 @Composable
 fun SettingsScreen(state: AppState) {
     val settings = state.settings
-    var musicDir by remember { mutableStateOf(settings.musicDirectory()) }
+    val musicDir = state.storage.musicDirectory
     var format by remember { mutableStateOf(settings.audioFormat()) }
+    var quality by remember { mutableStateOf(settings.audioQuality()) }
     var cookies by remember { mutableStateOf(settings.cookieSource()) }
 
     fun saveCookies(source: CookieSource) {
@@ -78,17 +79,8 @@ fun SettingsScreen(state: AppState) {
             Section("Библиотека") {
                 SettingRow("Папка с музыкой", musicDir.toString()) {
                     OutlinedButton(onClick = {
-                        chooseDirectory(musicDir)?.let {
-                            musicDir = it
-                            settings.setMusicDirectory(it)
-                            state.ask(
-                                "Найти музыку в новой папке?",
-                                "Треки медиатеки будут перепривязаны к файлам в этой папке, а файлы, которых нет " +
-                                    "в медиатеке, добавятся в плейлисты по именам своих подпапок.",
-                                PromptAction("Найти и добавить файлы") { state.storage.scan(adopt = true) },
-                            )
-                        }
-                    }) { Text("Изменить") }
+                        chooseDirectory(musicDir)?.let(state.storage::changeMusicFolder)
+                    }, enabled = state.storage.busy == null) { Text("Изменить") }
                 }
                 SettingRow("Хранилище", "Размер плейлистов, свободное место, поиск потерянных файлов и очистка") {
                     OutlinedButton(onClick = { state.navigate(Screen.Storage) }) { Text("Открыть") }
@@ -120,6 +112,21 @@ fun SettingsScreen(state: AppState) {
                     Segmented(listOf(Settings.FORMAT_MP3 to "MP3", Settings.FORMAT_M4A to "M4A"), format) {
                         format = it
                         settings.setAudioFormat(it)
+                    }
+                }
+                if (format == Settings.FORMAT_MP3) {
+                    SettingRow(
+                        "Качество MP3",
+                        "Для новых загрузок. Звук на YouTube — около 130–160 кбит/с, поэтому выше «Лучшего» " +
+                            "качество не станет; меньший битрейт экономит место",
+                    ) {
+                        Segmented(
+                            listOf(Settings.QUALITY_BEST to "Лучшее", "320K" to "320", "192K" to "192", "128K" to "128"),
+                            quality,
+                        ) {
+                            quality = it
+                            settings.setAudioQuality(it)
+                        }
                     }
                 }
             }

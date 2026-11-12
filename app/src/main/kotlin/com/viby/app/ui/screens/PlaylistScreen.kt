@@ -160,7 +160,7 @@ fun PlaylistScreen(state: AppState, playlistId: String) {
             )
         }
         val counts = TrackFilter.entries.associateWith { f -> playlist.tracks.count(f::matches) }
-        if (counts.getValue(TrackFilter.NOT_DOWNLOADED) > 0 || view.filter != TrackFilter.ALL) {
+        if (counts.any { (filter, count) -> filter != TrackFilter.ALL && count > 0 } || view.filter != TrackFilter.ALL) {
             item {
                 FilterChips(view.filter, counts) { view = view.copy(filter = it); state.library.saveView(playlistId, view) }
             }
@@ -173,7 +173,11 @@ fun PlaylistScreen(state: AppState, playlistId: String) {
                         EmptyHint("Плейлист пуст", "Добавьте сюда треки по ссылке с YouTube.")
                     } else if (query.isBlank() && view.filter != TrackFilter.ALL) {
                         EmptyHint(
-                            if (view.filter == TrackFilter.FAILED) "Ошибок загрузки нет" else "Все треки загружены",
+                            when (view.filter) {
+                                TrackFilter.FAILED -> "Ошибок загрузки нет"
+                                TrackFilter.MISSING -> "Все файлы на месте"
+                                else -> "Все треки загружены"
+                            },
                             "Сейчас показаны только треки «${view.filter.label.lowercase()}».",
                         )
                     } else {
@@ -194,12 +198,20 @@ fun PlaylistScreen(state: AppState, playlistId: String) {
                         add(MenuAction("Вставить после проигрываемого") { player.enqueueNext(targets) })
                         if (track.videoId != null) add(MenuAction("Радио по треку") { state.downloads.radio(track) })
                         add(MenuAction("Отправить в плейлист…") { moveDialog = ids })
+                        val liked = targets.all(state.favorites::isFavorite)
+                        add(MenuAction(if (liked) "Убрать из избранного" else "В избранное") {
+                            state.favorites.set(targets, !liked)
+                        })
                         if (track.id !in selection) add(MenuAction("Выделить") { selection = selection + track.id })
                         val retryable = targets.filter { !it.isDownloaded && it.videoId != null }
                         if (retryable.isNotEmpty()) {
                             add(MenuAction("Повторить загрузку") {
                                 retryable.forEach { state.downloads.retry(it) }
                             })
+                        }
+                        val lost = targets.filter { it.fileMissing && (it.videoId != null || it.sourceUrl != null) }
+                        if (lost.isNotEmpty()) {
+                            add(MenuAction("Скачать заново") { state.storage.redownload(lost) })
                         }
                         add(MenuAction("Удалить из плейлиста") {
                             state.deleteTracks(playlist, targets, deleteFiles = false)
@@ -229,6 +241,8 @@ fun PlaylistScreen(state: AppState, playlistId: String) {
                     onTogglePlay = player::togglePlay,
                     modifier = Modifier.padding(horizontal = if (LocalCompactPlaylist.current) 4.dp else 16.dp),
                     showAdded = !LocalCompactPlaylist.current,
+                    favorite = state.favorites.isFavorite(track),
+                    onFavorite = { state.favorites.toggle(track) },
                 )
             }
         }
@@ -375,7 +389,14 @@ fun SearchField(
 }
 
 @Composable
-private fun SortMenu(sort: SortMode, onSort: (SortMode) -> Unit, showLabel: Boolean = true) {
+internal fun SortMenu(
+    sort: SortMode,
+    onSort: (SortMode) -> Unit,
+    showLabel: Boolean = true,
+    /** Name of [SortMode.YOUTUBE] outside playlists ("Сначала недавние"). */
+    defaultLabel: String? = null,
+) {
+    fun label(mode: SortMode) = if (mode == SortMode.YOUTUBE && defaultLabel != null) defaultLabel else mode.label
     var open by remember { mutableStateOf(false) }
     Box {
         Row(
@@ -383,7 +404,7 @@ private fun SortMenu(sort: SortMode, onSort: (SortMode) -> Unit, showLabel: Bool
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (showLabel) {
-                Text(sort.label, style = MaterialTheme.typography.bodyMedium, color = VibyColors.TextSecondary,
+                Text(label(sort), style = MaterialTheme.typography.bodyMedium, color = VibyColors.TextSecondary,
                     maxLines = 1)
                 Spacer(Modifier.width(6.dp))
             }
@@ -393,7 +414,7 @@ private fun SortMenu(sort: SortMode, onSort: (SortMode) -> Unit, showLabel: Bool
             SortMode.entries.forEach { mode ->
                 DropdownMenuItem(
                     text = {
-                        Text(mode.label, color = if (mode == sort) VibyColors.AccentBright else VibyColors.TextPrimary)
+                        Text(label(mode), color = if (mode == sort) VibyColors.AccentBright else VibyColors.TextPrimary)
                     },
                     onClick = { onSort(mode); open = false },
                 )
@@ -457,7 +478,7 @@ private fun HeaderText(text: String, modifier: Modifier) {
 }
 
 @Composable
-private fun MoveDialog(playlists: List<Playlist>, onDismiss: () -> Unit, onMove: (Playlist) -> Unit) {
+internal fun MoveDialog(playlists: List<Playlist>, onDismiss: () -> Unit, onMove: (Playlist) -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = VibyColors.Elevated,
@@ -484,7 +505,7 @@ private fun MoveDialog(playlists: List<Playlist>, onDismiss: () -> Unit, onMove:
 /** True when the playlist column is narrow (small window or side panel open). */
 private val LocalCompactPlaylist = compositionLocalOf { false }
 
-private fun totalDuration(ms: Long): String {
+internal fun totalDuration(ms: Long): String {
     val duration = ms.milliseconds
     val hours = duration.inWholeHours
     val minutes = duration.inWholeMinutes % 60

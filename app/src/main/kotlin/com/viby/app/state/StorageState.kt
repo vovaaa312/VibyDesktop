@@ -10,6 +10,7 @@ import com.viby.core.data.PlaylistExport
 import com.viby.core.download.DownloadJob
 import com.viby.core.util.Formats
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.awt.FileDialog
@@ -29,16 +30,105 @@ class StorageState(private val app: AppState) {
     var busy by mutableStateOf<String?>(null)
         private set
 
+    /** Settings → Папка с музыкой; changes through [changeMusicFolder]. */
+    var musicDirectory by mutableStateOf<Path>(app.settings.musicDirectory())
+        private set
+
     fun refresh() = run("Считаю размер медиатеки…") { refreshNow() }
 
     private suspend fun refreshNow() {
         report = withContext(Dispatchers.IO) { app.engine.storage().report() }
+        // "файл не найден" marks are computed when the library loads
+        app.library.requestReload()
+    }
+
+    // ------------------------------------------------------------------ music folder
+
+    /**
+     * Track paths are absolute, so a new folder alone changes nothing for the music that is
+     * already downloaded. The user decides: move it, pick up copies that are already in the new
+     * folder, or leave the old files where they are.
+     */
+    fun changeMusicFolder(target: Path) {
+        val old = app.settings.musicDirectory()
+        if (old.toAbsolutePath().normalize() == target.toAbsolutePath().normalize()) return
+        run("Проверяю папки…") {
+            val plan = withContext(Dispatchers.IO) { app.engine.mover().plan(old, target) }
+            val keep = PromptAction(if (plan.files() > 0) "Оставить старые треки на месте" else "Просто использовать эту папку") {
+                applyMusicFolder(target)
+                refresh()
+                app.showMessage("Новые загрузки будут сохраняться в $target")
+            }
+            if (plan.files() == 0 && plan.audioInTarget() == 0) {
+                // nothing to move and nothing to find: no question to ask
+                applyMusicFolder(target)
+                refreshNow()
+                app.showMessage("Новые загрузки будут сохраняться в ${target}")
+                return@run
+            }
+            val actions = buildList {
+                if (plan.files() > 0) add(PromptAction("Перенести музыку в новую папку") { moveLibrary(old, target) })
+                if (plan.audioInTarget() > 0) {
+                    add(PromptAction("Музыка уже лежит в новой папке — найти её") {
+                        applyMusicFolder(target)
+                        scan(adopt = true, preferRoot = true)
+                    })
+                }
+                add(keep)
+            }
+            app.ask(
+                "Сменить папку с музыкой?",
+                buildString {
+                    append("Новая папка: $target\n")
+                    if (plan.files() > 0) {
+                        append("В прежней папке $old — ${plan.files()} ${filesWord(plan.files())} медиатеки " +
+                            "(${Formats.bytes(plan.bytes())}). Если их не перенести, они останутся там и будут играть оттуда.")
+                    } else {
+                        append("В прежней папке файлов медиатеки нет.")
+                    }
+                    if (plan.audioInTarget() > 0) {
+                        append("\nВ новой папке уже есть аудиофайлы: ${plan.audioInTarget()}.")
+                    }
+                },
+                *actions.toTypedArray(),
+            )
+        }
+    }
+
+    private fun applyMusicFolder(target: Path) {
+        app.settings.setMusicDirectory(target)
+        musicDirectory = target
+    }
+
+    private fun moveLibrary(from: Path, to: Path) = run("Переношу музыку…") {
+        // Windows cannot move the file that is playing
+        val resume = app.releasePlayingFile()
+        try {
+            delay(300)
+            val result = withContext(Dispatchers.IO) {
+                app.engine.mover().move(from, to) { done, total -> progress("Переношу музыку… $done из $total") }
+            }
+            // the folder changes only when the move ran: "no space" leaves everything as it was
+            applyMusicFolder(to)
+            refreshNow()
+            if (result.failed() > 0) {
+                app.showError(
+                    result.firstError(),
+                    "Перенесено: ${result.moved()} ${filesWord(result.moved())}, не удалось: ${result.failed()} " +
+                        "(остались в прежней папке и играют оттуда)",
+                )
+            } else {
+                app.showMessage("Музыка перенесена: ${result.moved()} ${filesWord(result.moved())} → $to")
+            }
+        } finally {
+            resume()
+        }
     }
 
     /** Relinks moved files; [adopt] also adds files the library does not know to their folder's playlist. */
-    fun scan(adopt: Boolean) = run("Ищу файлы в папке с музыкой…") {
+    fun scan(adopt: Boolean, preferRoot: Boolean = false) = run("Ищу файлы в папке с музыкой…") {
         val result = withContext(Dispatchers.IO) {
-            app.engine.scanner().scan(adopt) { done, total -> progress("Читаю теги файлов… $done из $total") }
+            app.engine.scanner().scan(adopt, preferRoot) { done, total -> progress("Читаю теги файлов… $done из $total") }
         }
         refreshNow()
         val parts = buildList {
@@ -126,6 +216,16 @@ class StorageState(private val app: AppState) {
         }
     }
 
+    /** Track menu → "Скачать заново": for downloaded tracks whose file is gone. */
+    fun redownload(tracks: List<com.viby.app.model.Track>) {
+        val ids = tracks.filter { it.videoId != null || !it.sourceUrl.isNullOrEmpty() }.map { it.id.toLong() }
+        if (ids.isEmpty()) return
+        app.io {
+            val queued = app.engine.redownload(ids.mapNotNull(app.engine.library()::track))
+            app.scope.launch { app.showMessage("В очередь загрузок: ${tracksLabel(queued)}") }
+        }
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private fun offerRedownload(missing: List<CoreTrack>) {
@@ -164,7 +264,7 @@ class StorageState(private val app: AppState) {
 
     private fun chooseSave(title: String, name: String): Path? {
         val dialog = FileDialog(null as Frame?, title, FileDialog.SAVE).apply {
-            directory = app.settings.musicDirectory().toString()
+            directory = musicDirectory.toString()
             file = name
             isVisible = true
         }

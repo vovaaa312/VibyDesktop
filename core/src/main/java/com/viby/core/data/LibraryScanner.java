@@ -59,12 +59,22 @@ public final class LibraryScanner {
     }
 
     public Result scan(boolean adoptUntracked, Progress progress) throws IOException {
-        Path root = musicDirectory.get();
+        return scan(adoptUntracked, false, progress);
+    }
+
+    /**
+     * @param preferRoot after the music folder changed to one that already holds the music
+     *                   (copied by hand): tracks whose file still exists elsewhere switch to the
+     *                   same file in the music folder instead of the copy being added twice
+     */
+    public Result scan(boolean adoptUntracked, boolean preferRoot, Progress progress) throws IOException {
+        Path root = musicDirectory.get().toAbsolutePath().normalize();
         List<Path> files = audioFiles(root);
         List<Track> tracks = library.allTracks();
 
         Set<String> referenced = new HashSet<>();
         List<Track> missing = new ArrayList<>();
+        List<Track> outside = new ArrayList<>();
         for (Track track : tracks) {
             // pending placeholders have no path yet; restored backup rows keep their old one
             if (track.filePath == null || track.filePath.isEmpty()) {
@@ -72,6 +82,9 @@ public final class LibraryScanner {
             }
             if (new File(track.filePath).isFile()) {
                 referenced.add(key(Path.of(track.filePath)));
+                if (preferRoot && !Path.of(track.filePath).toAbsolutePath().normalize().startsWith(root)) {
+                    outside.add(track);
+                }
             } else {
                 missing.add(track);
             }
@@ -89,6 +102,13 @@ public final class LibraryScanner {
         for (Track track : missing) {
             Path match = byName(track, free);
             if (match != null) {
+                link(track, match, relinked, used);
+            }
+        }
+        // 1b. the same file (name and size) copied into the music folder replaces the outside one
+        for (Track track : outside) {
+            Path match = byName(track, free);
+            if (match != null && sameSize(match, Path.of(track.filePath))) {
                 link(track, match, relinked, used);
             }
         }
@@ -231,6 +251,14 @@ public final class LibraryScanner {
     private static String folderName(Path file) {
         Path parent = file.getParent();
         return parent != null && parent.getFileName() != null ? parent.getFileName().toString() : "";
+    }
+
+    private static boolean sameSize(Path a, Path b) {
+        try {
+            return Files.size(a) == Files.size(b);
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     private static long modified(Path file) {

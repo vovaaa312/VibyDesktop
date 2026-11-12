@@ -62,6 +62,8 @@ import com.viby.app.ui.screens.PlaylistScreen
 import com.viby.app.ui.screens.SettingsScreen
 import com.viby.app.ui.screens.StorageScreen
 import com.viby.app.ui.screens.SearchScreen
+import com.viby.app.ui.screens.LibraryScreen
+import com.viby.app.ui.screens.CollectionScreen
 import com.viby.app.ui.screens.YoutubePlaylistsScreen
 import com.viby.core.VibyEngine
 import com.viby.core.platform.AppDirs
@@ -214,6 +216,8 @@ fun App(state: AppState) {
                                     Screen.YoutubePlaylists -> YoutubePlaylistsScreen(state)
                                     Screen.Storage -> StorageScreen(state)
                                     Screen.Search -> SearchScreen(state)
+                                    Screen.Library -> LibraryScreen(state)
+                                    is Screen.Collection -> CollectionScreen(state, screen.ref)
                                     is Screen.PlaylistScreen -> PlaylistScreen(state, screen.id)
                                 }
                             }

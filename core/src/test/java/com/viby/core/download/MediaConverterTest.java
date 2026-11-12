@@ -30,6 +30,17 @@ class MediaConverterTest {
     }
 
     @Test
+    void mp3UsesTheBitrateFromSettingsAndM4aKeepsTheSource() {
+        MediaConverter chosen = new MediaConverter(() -> "192K");
+        YtDlpRequest mp3 = new YtDlpRequest("url");
+        chosen.configure(mp3, "mp3");
+        assertEquals("192K", mp3.getOption("--audio-quality"));
+        YtDlpRequest m4a = new YtDlpRequest("url");
+        chosen.configure(m4a, "m4a");
+        assertEquals("0", m4a.getOption("--audio-quality"));
+    }
+
+    @Test
     void findOutputPrefersRequestedFormat() throws Exception {
         File expected = new File(directory, "song.mp3");
         assertTrue(expected.createNewFile());

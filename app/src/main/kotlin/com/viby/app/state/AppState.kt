@@ -1,5 +1,6 @@
 package com.viby.app.state
 
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -39,12 +40,24 @@ sealed interface Screen {
     data object YoutubePlaylists : Screen
     data object Storage : Screen
     data object Search : Screen
+    /** Медиатека: all tracks, artists, albums, folders, recently played ([AppState.libraryTab]). */
+    data object Library : Screen
+    data class Collection(val ref: CollectionRef) : Screen
     data class PlaylistScreen(val id: String) : Screen
 }
 
 enum class SidePanel { NONE, QUEUE, LYRICS }
 
+enum class LibraryTab(val label: String) {
+    TRACKS("Треки"), ARTISTS("Исполнители"), ALBUMS("Альбомы"), FOLDERS("Папки"), RECENT("Недавние")
+}
+
+/** A [CollectionRef] resolved against the current library. */
+class CollectionView(val kind: String, val title: String, val detail: String?, val tracks: List<LibrarySearch.TrackHit>)
+
 private const val THEME_KEY = "theme"
+/** Queue context of the home screen shelves; "@" marks it as not a playlist. */
+private const val SHELF_CONTEXT = "@home"
 private const val STREAM_RETRY_INTERVAL_MS = 30_000L
 
 /** Formats ffmpeg decodes that the import dialog offers. */
@@ -75,6 +88,16 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
     val account = AccountState(this)
     val updates = UpdateState(this)
     val storage = StorageState(this)
+    val favorites = FavoritesState(settings)
+    val history = HistoryState(settings)
+    val albums = AlbumsState(this)
+
+    var libraryTab by mutableStateOf(LibraryTab.TRACKS)
+
+    val sleepTimer = SleepTimer(scope) {
+        player.pause()
+        showMessage("Таймер сна: воспроизведение остановлено")
+    }
 
     var engineStatus by mutableStateOf(engine.status())
         private set
@@ -98,7 +121,13 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
     init {
         VibyColors.theme = AccentTheme.entries.firstOrNull { it.name == settings.getString(THEME_KEY, "") }
             ?: AccentTheme.VIBY
-        engine.addListener { status -> scope.launch { engineStatus = status } }
+        engine.addListener { status ->
+            scope.launch {
+                engineStatus = status
+                // album tags need ffprobe, which is ready only now on a first start
+                if (library.loaded) albums.refresh()
+            }
+        }
         engine.library().addListener { library.requestReload() }
         engine.downloads().addListener(downloads::onJobsChanged)
         library.requestReload()
@@ -117,7 +146,14 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
         }
         engine.audio().setListener(object : AudioEngine.Listener {
             override fun onEnded() {
-                scope.launch { player.onEnded() }
+                scope.launch {
+                    if (sleepTimer.consumeTrackEnd()) {
+                        player.finishAndStop()
+                        showMessage("Таймер сна: трек закончился, воспроизведение остановлено")
+                    } else {
+                        player.onEnded()
+                    }
+                }
             }
 
             override fun onError(message: String) {
@@ -146,22 +182,39 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
         val file = track.filePath
         player.isLoading = false
         streaming = false
+        if (!paused && !retry) history.record(track)
         if (file != null && File(file).isFile) {
             audio.play(file, startMs, paused)
             return
         }
+        if (track.isDownloaded) {
+            // the UI snapshot may be older than the database (files were just moved or relinked)
+            val fresh = runCatching { engine.library().track(track.id.toLong())?.filePath }.getOrNull()
+            if (!fresh.isNullOrEmpty() && File(fresh).isFile) {
+                audio.play(fresh, startMs, paused)
+                return
+            }
+        }
         val source = track.sourceUrl ?: track.videoId?.let { "https://www.youtube.com/watch?v=$it" }
         if (source == null || !engine.isReady) {
-            showMessage(if (source == null) "Файл трека не найден" else "Подождите: идёт подготовка yt-dlp и FFmpeg")
+            showMessage(
+                if (source == null) "Файл трека не найден. Проверьте папку с музыкой: Настройки → Хранилище → «Найти»"
+                else "Подождите: идёт подготовка yt-dlp и FFmpeg"
+            )
             player.onFailed()
             return
         }
         audio.stop()
         player.isLoading = true
         streaming = true
-        if (!retry) showMessage("Трек ещё не скачан — играю онлайн и скачиваю его первым")
-        // Android: a pending track that starts playing jumps to the front of the download queue
-        if (track.videoId != null && track.playlistName.isNotEmpty()) downloads.prioritize(track)
+        if (track.isDownloaded) {
+            // downloaded once, but the file is gone: say so instead of pretending it never was
+            if (!retry) showMessage("Файл трека не найден — играю онлайн. Вернуть файлы: Настройки → Хранилище → «Найти»")
+        } else {
+            if (!retry) showMessage("Трек ещё не скачан — играю онлайн и скачиваю его первым")
+            // Android: a pending track that starts playing jumps to the front of the download queue
+            if (track.videoId != null && track.playlistName.isNotEmpty()) downloads.prioritize(track)
+        }
         scope.launch {
             val url = runCatching { withContext(Dispatchers.IO) { engine.resolveStreamUrl(source) } }
             if (token != loadToken) return@launch
@@ -210,6 +263,7 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
         VibyColors.theme = AccentTheme.entries.firstOrNull { it.name == settings.getString(THEME_KEY, "") }
             ?: AccentTheme.VIBY
         engine.equalizer().reload()
+        favorites.reload()
     }
 
     /** Settings → Оформление: switches the accent everywhere at once and remembers it. */
@@ -346,33 +400,70 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
         library.playlist(playlistId)?.let { player.syncWithPlaylist(playlistId, playable(ordered(it))) }
     }
 
-    fun playPlaylist(playlist: Playlist, start: Track? = null, shuffle: Boolean = false) {
-        val tracks = ordered(playlist)
+    fun playPlaylist(playlist: Playlist, start: Track? = null, shuffle: Boolean = false) =
+        playTracks(playlist.id, ordered(playlist), start, shuffle)
+
+    /** A shelf on the home screen: the queue is the shelf, starting at the clicked track. */
+    fun playShelf(tracks: List<Track>, start: Track) = playTracks(SHELF_CONTEXT, tracks, start, shuffle = false)
+
+    /** Plays a library section in the order it is shown; the queue is exactly that list. */
+    fun playCollection(ref: CollectionRef, tracks: List<Track>, start: Track? = null, shuffle: Boolean = false) =
+        playTracks(ref.id, tracks, start, shuffle)
+
+    private fun playTracks(contextId: String, tracks: List<Track>, start: Track?, shuffle: Boolean) {
         val playable = playable(tracks)
         if (shuffle) player.setShuffleEnabled(true)
         if (start != null && !isPlayableLocal(start)) {
             // keep the pending track at its place among the local ones
             val queue = tracks.filter { it.id == start.id || isPlayableLocal(it) }
-            player.playWithPending(queue, start, playlist.id)
+            player.playWithPending(queue, start, contextId)
             return
         }
+        val lost = tracks.count { it.fileMissing }
         if (playable.isEmpty()) {
-            showMessage("В плейлисте пока нет скачанных треков")
+            if (lost > 0) {
+                ask(
+                    "Файлы плейлиста не найдены",
+                    "У ${tracksLabel(lost)} нет файла на диске: папку с музыкой перенесли, переименовали или удалили. " +
+                        "Viby поищет файлы в папке с музыкой, а чего не найдёт — предложит скачать заново.",
+                    PromptAction("Найти файлы") { storage.scan(adopt = false) },
+                )
+            } else {
+                showMessage("В плейлисте пока нет скачанных треков")
+            }
             return
         }
-        player.playQueue(playable, start ?: if (shuffle) playable.random() else playable.first(), playlist.id)
+        val first = start ?: if (shuffle) playable.random() else playable.first()
+        // a section has no stored order to follow: what is on screen replaces the queue
+        if (contextId.startsWith("@")) player.replaceQueue(playable, first, contextId)
+        else player.playQueue(playable, first, contextId)
+        if (start == null && lost > 0) {
+            showMessage("Пропущено: ${tracksLabel(lost)} без файла на диске. Настройки → Хранилище → «Найти»")
+        }
+    }
+
+    /**
+     * Stops the decoder so the playing file can be moved (Windows locks an open file); the
+     * returned action resumes at the same position, from wherever the file is by then.
+     */
+    fun releasePlayingFile(): () -> Unit {
+        if (!engine.audio().hasSource()) return {}
+        engine.audio().stop()
+        return {
+            if (!engine.audio().hasSource()) player.current?.let { loadTrack(it, player.positionMs, !player.isPlaying) }
+        }
     }
 
     /** Android PlaybackQueueController.isPlayableLocal: downloaded and the file is still there. */
     fun isPlayableLocal(track: Track): Boolean =
-        track.isDownloaded && track.filePath != null && File(track.filePath).isFile
+        track.isDownloaded && track.filePath != null && !track.fileMissing
 
     fun playable(tracks: List<Track>): List<Track> = tracks.filter(::isPlayableLocal)
 
     /** Android PlaybackQueueController.resetToActivePlaylist. */
     fun resetQueue() {
         val playlist = player.contextPlaylistId?.let(library::playlist)
-        player.resetTo(playable(playlist?.tracks.orEmpty()), playlist?.id)
+        player.resetTo(playable(playlist?.let(::ordered).orEmpty()), playlist?.id)
         showMessage("Очередь сброшена")
     }
 
@@ -395,6 +486,7 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
 
     /** Restores the last queue once the library is loaded (PlaybackStateStore.restore). */
     internal fun onLibraryLoaded() {
+        albums.refresh()
         if (playbackRestored) {
             player.contextPlaylistId?.let(::resyncQueue)
             return
@@ -453,6 +545,24 @@ class LibraryState(private val app: AppState) {
         reloads.trySend(Unit)
     }
 
+    /** The library regrouped by song, artist, album and folder; rebuilt when it or the album tags change. */
+    val index: LibraryIndex by derivedStateOf { LibraryIndex(playlists, app.albums.byPath) }
+
+    /** What [ref] holds right now; null when it is gone (the last track of an artist was deleted). */
+    fun collection(ref: CollectionRef): CollectionView? = when (ref) {
+        CollectionRef.AllTracks -> CollectionView("Медиатека", "Все треки", null, index.tracks)
+        CollectionRef.Favorites -> {
+            val liked = app.favorites.liked
+            CollectionView("Подборка", "Избранное", null,
+                index.tracks.filter { it.track.key in liked }.sortedByDescending { liked[it.track.key] })
+        }
+        CollectionRef.Recent ->
+            CollectionView("Подборка", "Недавно прослушанные", null, app.history.recent.mapNotNull(index::find))
+        is CollectionRef.Artist -> index.artist(ref.key)?.let { CollectionView("Исполнитель", it.name, null, it.tracks) }
+        is CollectionRef.Album -> index.album(ref.key)?.let { CollectionView("Альбом", it.name, it.detail, it.tracks) }
+        is CollectionRef.Folder -> index.folder(ref.key)?.let { CollectionView("Папка", it.name, it.detail, it.tracks) }
+    }
+
     fun playlist(id: String): Playlist? = playlists.firstOrNull { it.id == id }
 
     fun findTrack(id: String): Track? = playlists.firstNotNullOfOrNull { p -> p.tracks.firstOrNull { it.id == id } }
@@ -469,7 +579,10 @@ class LibraryState(private val app: AppState) {
 
     fun rename(from: String, to: String) = app.io {
         if (!app.engine.library().renamePlaylist(from, to)) error("Плейлист «$to» уже существует")
-        app.scope.launch { view(from).takeIf { it != PlaylistView() }?.let { saveView(to, it); saveView(from, PlaylistView()) } }
+        app.scope.launch {
+            view(from).takeIf { it != PlaylistView() }?.let { saveView(to, it); saveView(from, PlaylistView()) }
+            app.player.renameContext(from, to)
+        }
     }
 
     /** The sort and filter the user picked for [playlistId], remembered across restarts. */
@@ -580,6 +693,7 @@ class LibraryState(private val app: AppState) {
             downloadProgress = if (downloaded) null else downloadProgress,
             thumbnailUrl = thumbnailUrl,
             filePath = filePath.takeIf { downloaded },
+            fileMissing = downloaded && (filePath.isNullOrEmpty() || !File(filePath).isFile),
             videoId = videoId,
             playlistName = playlistName,
             sourceUrl = sourceUrl,

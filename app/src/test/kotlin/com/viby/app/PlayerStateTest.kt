@@ -202,4 +202,46 @@ class PlayerStateTest {
         player.toggleShuffle()
         assertEquals(tracks.reversed().map { it.id }, ids(player))
     }
+
+    /** Sleep timer "до конца трека": the next track is ready but silent. */
+    @Test
+    fun finishAndStopLoadsTheNextTrackPaused() {
+        val player = PlayerState()
+        val loads = mutableListOf<Pair<String, Boolean>>()
+        player.loader = { track, _, paused -> loads += track.id to paused }
+        player.playQueue(tracks, tracks[0], "p")
+        player.finishAndStop()
+        assertEquals("t2", player.current?.id)
+        assertFalse(player.isPlaying)
+        assertEquals("t2" to true, loads.last())
+
+        // the end of the queue simply stops
+        player.playQueue(tracks, tracks.last(), "p")
+        player.finishAndStop()
+        assertFalse(player.isPlaying)
+        assertEquals("t8", player.current?.id)
+    }
+
+    @Test
+    fun renamedPlaylistKeepsItsQueue() {
+        val player = PlayerState()
+        player.playQueue(tracks, tracks[0], "old")
+        player.renameContext("other", "x")
+        assertEquals("old", player.contextPlaylistId)
+        player.renameContext("old", "new")
+        assertEquals("new", player.contextPlaylistId)
+        player.syncWithPlaylist("new", tracks.reversed())
+        assertEquals("t8", player.queue.first().id)
+    }
+
+    /** A library section replaces the queue with what is on screen even when the track is already queued. */
+    @Test
+    fun sectionReplacesTheQueueWithTheShownList() {
+        val player = PlayerState()
+        player.replaceQueue(tracks, tracks[0], "@all")
+        val filtered = listOf(tracks[4], tracks[2])
+        player.replaceQueue(filtered, tracks[2], "@all")
+        assertEquals(listOf("t5", "t3"), ids(player))
+        assertEquals("t3", player.current?.id)
+    }
 }

@@ -75,6 +75,16 @@ fun HomeScreen(state: AppState) {
             Spacer(Modifier.height(16.dp))
             if (filter != HomeFilter.RECENT) ShortcutGrid(state, playlists.take(8))
         }
+        val played = remember(state.history.played, state.library.index) {
+            state.history.recent.asSequence().mapNotNull(state.library.index::find).map { it.track }.take(16).toList()
+        }
+        if (filter != HomeFilter.PLAYLISTS && played.isNotEmpty()) {
+            Column(Modifier.padding(horizontal = 32.dp)) {
+                SectionTitle("Недавно прослушанные")
+                QuickPicks(state, played)
+            }
+            Spacer(Modifier.height(32.dp))
+        }
         if (filter != HomeFilter.PLAYLISTS) {
             Column(Modifier.padding(horizontal = 32.dp)) {
                 SectionTitle("Быстрый выбор")
@@ -207,7 +217,8 @@ private fun QuickPicks(state: AppState, tracks: List<Track>) {
                             .background(if (hovered) VibyColors.Hover else Color.Transparent)
                             .hoverable(interaction)
                             .clickable(interactionSource = interaction, indication = null) {
-                                state.player.playQueue(state.playable(tracks), track, null)
+                                // a track whose file is gone must not start another one instead
+                                state.playShelf(tracks, track)
                             }
                             .padding(6.dp),
                         verticalAlignment = Alignment.CenterVertically,

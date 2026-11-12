@@ -1,5 +1,6 @@
 package com.viby.core.data;
 
+import com.viby.core.util.ProcessPriority;
 import com.viby.core.util.YoutubeUrlParser;
 
 import org.jspecify.annotations.Nullable;
@@ -22,8 +23,12 @@ public final class AudioProbe {
     private static final long TIMEOUT_SECONDS = 15;
 
     public record Info(@Nullable String title, @Nullable String artist, long durationMs,
-                       @Nullable String videoId) {
-        public static final Info EMPTY = new Info(null, null, 0L, null);
+                       @Nullable String videoId, @Nullable String album) {
+        public static final Info EMPTY = new Info(null, null, 0L, null, null);
+
+        public Info(@Nullable String title, @Nullable String artist, long durationMs, @Nullable String videoId) {
+            this(title, artist, durationMs, videoId, null);
+        }
     }
 
     public interface Reader {
@@ -38,10 +43,12 @@ public final class AudioProbe {
         return file -> {
             try {
                 Process probe = new ProcessBuilder(ffprobe.get().toString(), "-v", "error",
-                        "-show_entries", "format=duration:format_tags=title,artist,purl,comment",
+                        "-show_entries", "format=duration:format_tags=title,artist,album,purl,comment",
                         "-of", "json", file.getAbsolutePath())
                         .redirectError(ProcessBuilder.Redirect.DISCARD)
                         .start();
+                // reading the tags of a whole library must not disturb playback or a game
+                ProcessPriority.background(probe);
                 String output = new String(probe.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
                 if (!probe.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
                     probe.destroyForcibly();
@@ -71,7 +78,7 @@ public final class AudioProbe {
             videoId = comment != null ? YoutubeUrlParser.videoId(comment.trim()) : null;
         }
         return new Info(tag(tags, "title"), tag(tags, "artist"),
-                LibraryFiles.parseSeconds(format.optString("duration", null)), videoId);
+                LibraryFiles.parseSeconds(format.optString("duration", null)), videoId, tag(tags, "album"));
     }
 
     /** Tag keys are upper case in some containers (TITLE in Vorbis comments). */

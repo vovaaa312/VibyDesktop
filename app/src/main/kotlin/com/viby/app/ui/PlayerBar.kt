@@ -15,16 +15,25 @@ import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.automirrored.rounded.VolumeDown
 import androidx.compose.material.icons.automirrored.rounded.VolumeOff
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
+import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Lyrics
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.PointerEventType
@@ -38,6 +47,7 @@ import com.viby.app.model.RepeatMode
 import com.viby.app.state.AppState
 import com.viby.app.state.Screen
 import com.viby.app.state.SidePanel
+import com.viby.app.state.SleepTimer
 import com.viby.app.theme.VibyColors
 import com.viby.core.util.Formats
 
@@ -60,6 +70,13 @@ fun PlayerBar(state: AppState, modifier: Modifier = Modifier) {
                     Text(track.artist, style = MaterialTheme.typography.bodySmall, color = VibyColors.TextSecondary,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
+                Spacer(Modifier.width(8.dp))
+                val liked = state.favorites.isFavorite(track)
+                IconAction(
+                    if (liked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                    if (liked) "Убрать из избранного" else "В избранное",
+                    { state.favorites.toggle(track) }, active = liked,
+                )
             }
         }
 
@@ -95,6 +112,7 @@ fun PlayerBar(state: AppState, modifier: Modifier = Modifier) {
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            SleepTimerButton(state.sleepTimer)
             IconAction(Icons.Rounded.GraphicEq, "Эквалайзер", { state.navigate(Screen.Equalizer) },
                 active = state.engine.equalizer().isEnabled)
             IconAction(Icons.Rounded.Lyrics, "Текст", { state.toggleSidePanel(SidePanel.LYRICS) },
@@ -117,6 +135,56 @@ fun PlayerBar(state: AppState, modifier: Modifier = Modifier) {
                         player.muted = false
                     })
                 }
+            }
+        }
+    }
+}
+
+/** Moon button: pick a sleep timer, or see what is left and switch it off. */
+@Composable
+private fun SleepTimerButton(timer: SleepTimer) {
+    var open by remember { mutableStateOf(false) }
+    val left = timer.remainingMs
+    Box {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (left != null) {
+                Text(Formats.duration(left), style = MaterialTheme.typography.labelMedium, color = VibyColors.AccentBright)
+            }
+            IconAction(
+                Icons.Rounded.Bedtime,
+                when {
+                    left != null -> "Таймер сна: осталось ${Formats.duration(left)}"
+                    timer.untilTrackEnds -> "Таймер сна: до конца трека"
+                    else -> "Таймер сна"
+                },
+                { open = true }, active = timer.active,
+            )
+        }
+        DropdownMenu(open, { open = false }, containerColor = VibyColors.Highlight) {
+            Text(
+                when {
+                    left != null -> "Остановка через ${Formats.duration(left)}"
+                    timer.untilTrackEnds -> "Остановка после этого трека"
+                    else -> "Остановить музыку через…"
+                },
+                style = MaterialTheme.typography.labelSmall, color = VibyColors.TextMuted,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+            )
+            SleepTimer.PRESETS_MINUTES.forEach { minutes ->
+                DropdownMenuItem(
+                    text = { Text(if (minutes < 60) "$minutes минут" else if (minutes == 60) "1 час" else "1,5 часа", color = VibyColors.TextPrimary) },
+                    onClick = { timer.start(minutes); open = false },
+                )
+            }
+            DropdownMenuItem(
+                text = { Text("До конца трека", color = if (timer.untilTrackEnds) VibyColors.AccentBright else VibyColors.TextPrimary) },
+                onClick = { timer.stopAfterTrack(); open = false },
+            )
+            if (timer.active) {
+                DropdownMenuItem(
+                    text = { Text("Выключить таймер", color = VibyColors.Danger) },
+                    onClick = { timer.cancel(); open = false },
+                )
             }
         }
     }
