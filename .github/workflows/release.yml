@@ -69,13 +69,18 @@ jobs:
           distribution: temurin
           java-version: 21
       - uses: gradle/actions/setup-gradle@v4
-      # Desktop OAuth client for Google sign-in; builds without the secret hide sign-in
+      # Desktop OAuth client for Google sign-in. A build without it has no "Аккаунт Google" and no
+      # "Мои плейлисты YouTube", so a release must not be published without the secret (1.2.0 was).
       - name: Google OAuth client
         shell: bash
         env:
           GOOGLE_OAUTH_CLIENT: ${{ secrets.GOOGLE_OAUTH_CLIENT }}
         run: |
-          if [ -n "$GOOGLE_OAUTH_CLIENT" ]; then printf '%s' "$GOOGLE_OAUTH_CLIENT" > client_secret.json; fi
+          if [ -z "$GOOGLE_OAUTH_CLIENT" ]; then
+            echo "::error::Repository secret GOOGLE_OAUTH_CLIENT is not set: the installers would have no Google sign-in. Set it to the contents of client_secret.json and re-run."
+            exit 1
+          fi
+          printf '%s' "$GOOGLE_OAUTH_CLIENT" > client_secret.json
       - run: ./gradlew test :app:${{ matrix.task }} --no-daemon
       - uses: softprops/action-gh-release@v2
         with:
