@@ -41,7 +41,7 @@ public final class LibraryBackup {
     static final String ZIP_DOCUMENT = "viby-library.json";
     static final String ZIP_MUSIC = "music/";
     /** Settings that describe taste, not this machine (no folders, cookies or accounts). */
-    static final List<String> PORTABLE_SETTINGS = List.of("audioFormat", "audioQuality", "theme", "equalizer",
+    static final List<String> PORTABLE_SETTINGS = List.of("audioFormat", "audioQuality", "normalizeVolume", "crossfadeSeconds", "theme", "equalizer",
             "favorites", "playlistViews");
     /** Restored into what is already there instead of replacing it, like the playlists. */
     static final List<String> MERGED_SETTINGS = List.of("favorites", "playlistViews");
@@ -130,14 +130,10 @@ public final class LibraryBackup {
         if (only == null) {
             JSONObject portable = new JSONObject();
             for (String key : PORTABLE_SETTINGS) {
-                JSONObject json = settings.getJson(key);
-                if (!json.isEmpty()) {
-                    portable.put(key, json);
-                } else {
-                    String value = settings.getString(key, "");
-                    if (!value.isEmpty()) {
-                        portable.put(key, value);
-                    }
+                Object value = settings.raw(key);
+                if (value instanceof JSONObject || value instanceof String || value instanceof Boolean
+                        || value instanceof Number) {
+                    portable.put(key, value);
                 }
             }
             document.put("settings", portable);
@@ -336,6 +332,8 @@ public final class LibraryBackup {
                 settings.putJson(key, object);
             } else if (value instanceof String text) {
                 settings.putString(key, text);
+            } else if (value instanceof Boolean || value instanceof Number) {
+                settings.putRaw(key, value);
             }
         }
         return true;

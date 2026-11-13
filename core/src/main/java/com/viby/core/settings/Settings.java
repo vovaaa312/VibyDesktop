@@ -72,6 +72,39 @@ public final class Settings {
         save();
     }
 
+    /** Volume normalization (loudness measured per track); on by default, like Spotify. */
+    public synchronized boolean normalizeVolume() {
+        return values.optBoolean("normalizeVolume", true);
+    }
+
+    public synchronized void setNormalizeVolume(boolean enabled) {
+        values.put("normalizeVolume", enabled);
+        save();
+    }
+
+    /** Longest crossfade offered: a longer overlap starts too noticeably early. */
+    public static final int MAX_CROSSFADE_SECONDS = 3;
+
+    /** Crossfade between tracks in seconds (0, 1 or 3); 0 = gapless without overlap. */
+    public synchronized int crossfadeSeconds() {
+        // 6 and 10 s were offered at first
+        return Math.max(0, Math.min(MAX_CROSSFADE_SECONDS, values.optInt("crossfadeSeconds", 0)));
+    }
+
+    public synchronized void setCrossfadeSeconds(int seconds) {
+        values.put("crossfadeSeconds", seconds);
+        save();
+    }
+
+    public synchronized @org.jspecify.annotations.Nullable Object raw(String key) {
+        return values.opt(key);
+    }
+
+    public synchronized void putRaw(String key, Object value) {
+        values.put(key, value);
+        save();
+    }
+
     public synchronized JSONObject getJson(String key) {
         JSONObject value = values.optJSONObject(key);
         return value != null ? new JSONObject(value.toString()) : new JSONObject();

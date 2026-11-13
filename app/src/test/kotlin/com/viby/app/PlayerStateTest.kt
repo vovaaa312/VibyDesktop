@@ -244,4 +244,31 @@ class PlayerStateTest {
         assertEquals(listOf("t5", "t3"), ids(player))
         assertEquals("t3", player.current?.id)
     }
+
+    /** Gapless: the engine continues by itself, the queue moves without loading the track again. */
+    @Test
+    fun advanceFollowsTheEngineWithoutReloading() {
+        val player = PlayerState()
+        val loads = mutableListOf<String>()
+        player.loader = { track, _, _ -> loads += track.id }
+        player.playQueue(tracks, tracks[0], "p")
+        assertEquals("t2", player.peekNext()?.id)
+
+        assertTrue(player.advanceTo { it.id == "t2" })
+        assertEquals("t2", player.current?.id)
+        assertEquals(listOf("t1"), loads)
+        // something else than the expected next track is ignored
+        assertFalse(player.advanceTo { it.id == "t7" })
+        assertEquals("t2", player.current?.id)
+
+        player.repeat = RepeatMode.ONE
+        assertEquals("t2", player.peekNext()?.id)
+        player.repeat = RepeatMode.OFF
+        player.playQueue(tracks, tracks.last(), "p")
+        assertEquals(null, player.peekNext())
+        player.repeat = RepeatMode.ALL
+        assertEquals("t1", player.peekNext()?.id)
+        assertTrue(player.advanceTo { it.id == "t1" })
+        assertEquals("t1", player.current?.id)
+    }
 }

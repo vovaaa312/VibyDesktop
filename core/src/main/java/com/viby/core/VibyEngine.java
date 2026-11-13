@@ -73,6 +73,7 @@ public final class VibyEngine implements AutoCloseable {
     private final LibraryStorage storage;
     private final LibraryMover mover;
     private final AlbumIndex albums;
+    private final com.viby.core.playback.LoudnessIndex loudness;
     private final NetworkMonitor network = new NetworkMonitor();
     private final AudioEngine audio;
     private final EqualizerController equalizer;
@@ -100,6 +101,8 @@ public final class VibyEngine implements AutoCloseable {
         this.backup = new LibraryBackup(library, settings, settings::musicDirectory);
         this.storage = new LibraryStorage(library, settings::musicDirectory);
         this.mover = new LibraryMover(library);
+        this.loudness = new com.viby.core.playback.LoudnessIndex(dirs.root().resolve("loudness.json"),
+                com.viby.core.playback.LoudnessIndex.ffmpeg(tools::ffmpeg));
         this.albums = new AlbumIndex(dirs.root().resolve("albums.json"), AudioProbe.ffprobe(tools::ffprobe));
         this.audio = new AudioEngine(tools::ffmpeg);
         this.equalizer = new EqualizerController(audio.equalizer(), settings);
@@ -205,6 +208,10 @@ public final class VibyEngine implements AutoCloseable {
 
     public AlbumIndex albums() {
         return albums;
+    }
+
+    public com.viby.core.playback.LoudnessIndex loudness() {
+        return loudness;
     }
 
     public DuplicateTracks duplicates() {

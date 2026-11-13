@@ -140,6 +140,38 @@ class PlayerState(private val audio: AudioOutput? = null) {
         onStateChanged()
     }
 
+    /** The track that [next] with an automatic transition would play; null at the end. */
+    fun peekNext(): Track? {
+        if (items.isEmpty() || currentIndex < 0) return null
+        if (repeat == RepeatMode.ONE) return current
+        val order = playbackOrder
+        val position = order.indexOf(currentIndex)
+        return when {
+            position + 1 < order.size -> items[order[position + 1]]
+            repeat != RepeatMode.OFF -> items[order[0]]
+            else -> null
+        }
+    }
+
+    /**
+     * The audio engine already continued with the next track (gapless or crossfade): the queue
+     * moves there without loading anything. False when [matches] is not the expected next track.
+     */
+    fun advanceTo(matches: (Track) -> Boolean): Boolean {
+        val next = peekNext() ?: return false
+        if (!matches(next)) return false
+        val order = playbackOrder
+        val position = order.indexOf(currentIndex)
+        currentIndex = when {
+            repeat == RepeatMode.ONE -> currentIndex
+            position + 1 < order.size -> order[position + 1]
+            else -> order[0]
+        }
+        positionMs = 0
+        onStateChanged()
+        return true
+    }
+
     /** Sleep timer: stops the sound and keeps the place in the queue. */
     fun pause() {
         if (isPlaying) togglePlay()
@@ -221,6 +253,12 @@ class PlayerState(private val audio: AudioOutput? = null) {
     fun seek(fraction: Float) {
         val track = current ?: return
         seekTo((track.durationMs * fraction.coerceIn(0f, 1f)).toLong())
+    }
+
+    /** Synced lyrics: a click on a line jumps to it. */
+    fun seekToMs(ms: Long) {
+        if (current == null) return
+        seekTo(ms.coerceAtLeast(0))
     }
 
     private fun seekTo(ms: Long) {

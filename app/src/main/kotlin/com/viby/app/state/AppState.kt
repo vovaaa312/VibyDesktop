@@ -94,7 +94,9 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
 
     var libraryTab by mutableStateOf(LibraryTab.TRACKS)
 
-    val sleepTimer = SleepTimer(scope) {
+    val sound by lazy { SoundState(this) }
+
+    val sleepTimer = SleepTimer(scope, onTrackEndChanged = { sound.updateNext() }) {
         player.pause()
         showMessage("Таймер сна: воспроизведение остановлено")
     }
@@ -125,14 +127,21 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
             scope.launch {
                 engineStatus = status
                 // album tags need ffprobe, which is ready only now on a first start
-                if (library.loaded) albums.refresh()
+                if (library.loaded) {
+                    albums.refresh()
+                    sound.refreshLibrary()
+                }
             }
         }
         engine.library().addListener { library.requestReload() }
         engine.downloads().addListener(downloads::onJobsChanged)
         library.requestReload()
         player.loader = { track, startMs, paused -> loadTrack(track, startMs, paused) }
-        player.onStateChanged = ::schedulePlaybackSave
+        player.onStateChanged = {
+            schedulePlaybackSave()
+            // the engine must always know what follows: queue edits, shuffle, repeat
+            sound.updateNext()
+        }
         engine.ytDlp().setCookieFailureListener {
             scope.launch {
                 if (!cookieWarningShown) {
@@ -145,6 +154,10 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
             }
         }
         engine.audio().setListener(object : AudioEngine.Listener {
+            override fun onAdvanced(source: String) {
+                scope.launch { sound.onAdvanced(source) }
+            }
+
             override fun onEnded() {
                 scope.launch {
                     if (sleepTimer.consumeTrackEnd()) {
@@ -184,14 +197,16 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
         streaming = false
         if (!paused && !retry) history.record(track)
         if (file != null && File(file).isFile) {
-            audio.play(file, startMs, paused)
+            audio.play(file, startMs, paused, track.durationMs, sound.gainFor(file))
+            sound.updateNext()
             return
         }
         if (track.isDownloaded) {
             // the UI snapshot may be older than the database (files were just moved or relinked)
             val fresh = runCatching { engine.library().track(track.id.toLong())?.filePath }.getOrNull()
             if (!fresh.isNullOrEmpty() && File(fresh).isFile) {
-                audio.play(fresh, startMs, paused)
+                audio.play(fresh, startMs, paused, track.durationMs, sound.gainFor(fresh))
+                sound.updateNext()
                 return
             }
         }
@@ -219,7 +234,10 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
             val url = runCatching { withContext(Dispatchers.IO) { engine.resolveStreamUrl(source) } }
             if (token != loadToken) return@launch
             player.isLoading = false
-            url.onSuccess { audio.play(debugBreakStream(it, retry), startMs, paused) }
+            url.onSuccess {
+                audio.play(debugBreakStream(it, retry), startMs, paused, track.durationMs, 0f)
+                sound.updateNext()
+            }
                 .onFailure {
                     showError(it, "Не удалось получить поток")
                     player.onFailed()
@@ -487,6 +505,7 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
     /** Restores the last queue once the library is loaded (PlaybackStateStore.restore). */
     internal fun onLibraryLoaded() {
         albums.refresh()
+        sound.refreshLibrary()
         if (playbackRestored) {
             player.contextPlaylistId?.let(::resyncQueue)
             return

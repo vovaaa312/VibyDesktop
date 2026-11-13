@@ -20,6 +20,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -56,6 +61,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.material3.TextButton
 import com.viby.core.auth.CookieSource
+import com.viby.core.lyrics.TimedLine
 import com.viby.core.lyrics.YoutubeLyricsRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -229,12 +235,18 @@ private fun Lyrics(state: AppState) {
     val result by produceState<LyricsResult>(LyricsResult.Loading, track.id) {
         value = withContext(Dispatchers.IO) { loadLyrics(state, track) }
     }
+    val background = Modifier
+        .fillMaxSize()
+        .padding(12.dp)
+        .clip(RoundedCornerShape(8.dp))
+        .background(Brush.verticalGradient(listOf(top.copy(alpha = 0.85f), bottom)))
+    val found = result as? LyricsResult.Found
+    if (found != null && found.lines.isNotEmpty()) {
+        SyncedLyrics(state, track, found, background)
+        return
+    }
     ScrollColumn(
-        Modifier
-            .fillMaxSize()
-            .padding(12.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(Brush.verticalGradient(listOf(top.copy(alpha = 0.85f), bottom))),
+        background,
         contentModifier = Modifier.padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -261,27 +273,97 @@ private fun Lyrics(state: AppState) {
     }
 }
 
+/**
+ * Karaoke view: the line being sung is bright and kept in the middle, sung lines dim, the rest
+ * waits; a click on a line jumps there.
+ */
+@Composable
+private fun SyncedLyrics(state: AppState, track: Track, lyrics: LyricsResult.Found, modifier: Modifier) {
+    val lines = lyrics.lines
+    // lines change a little before the voice: reading lags behind the sound
+    val position = state.player.positionMs + LYRICS_LEAD_MS
+    val currentLine = lines.indexOfLast { it.timeMs <= position }
+    val listState = rememberLazyListState()
+    LaunchedEffect(track.id, currentLine) {
+        // the header is item 0; keep the sung line about a third from the top
+        val target = (currentLine + 1).coerceAtLeast(0)
+        val anchor = listState.layoutInfo.viewportSize.height / 3
+        val visible = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == target }
+        if (visible != null) {
+            // the next line is on screen: one smooth glide from where the list is now
+            listState.animateScrollBy((visible.offset - anchor).toFloat(), tween(LYRICS_SCROLL_MS, easing = FastOutSlowInEasing))
+        } else {
+            // a seek or the first show: no long animated run through the whole text
+            listState.scrollToItem(target)
+            // measured only now: on the first show the panel has no size yet
+            listState.scrollBy(-listState.layoutInfo.viewportSize.height / 3f)
+        }
+    }
+    LazyColumn(modifier, state = listState, contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp)) {
+        item {
+            Column(Modifier.padding(bottom = 16.dp)) {
+                Text(track.title, style = MaterialTheme.typography.titleMedium, color = Color.White)
+                Text(track.artist, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.7f))
+            }
+        }
+        itemsIndexed(lines) { index, line ->
+            // only the brightness changes: a bigger font would re-wrap the line and shift the text below
+            val alpha by animateFloatAsState(
+                when {
+                    index == currentLine -> 1f
+                    index < currentLine -> 0.45f
+                    else -> 0.7f
+                },
+                tween(LYRICS_SCROLL_MS),
+            )
+            Text(
+                line.text().ifBlank { "♪" },
+                color = Color.White.copy(alpha = alpha),
+                fontSize = 20.sp,
+                lineHeight = 30.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(4.dp))
+                    .clickable { state.player.seekToMs(line.timeMs()) }
+                    .padding(vertical = 6.dp),
+            )
+        }
+        item {
+            Text(lyrics.source, color = Color.White.copy(alpha = 0.6f), style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 16.dp))
+        }
+    }
+}
+
+/** Synced lines switch this much before their time stamp. */
+private const val LYRICS_LEAD_MS = 250L
+/** Glide to the next line and fade of the highlight. */
+private const val LYRICS_SCROLL_MS = 450
+
 private sealed interface LyricsResult {
     data object Loading : LyricsResult
-    data class Found(val text: String, val source: String) : LyricsResult
+    data class Found(val text: String, val source: String, val lines: List<TimedLine> = emptyList()) : LyricsResult
     data class Missing(val message: String) : LyricsResult
 }
 
-/** YouTube Music lyrics first, then manual and automatic subtitles (Android order). */
+/** Synced lyrics from LRCLIB first, then YouTube Music, then the video's subtitles. */
 private fun loadLyrics(state: AppState, track: Track): LyricsResult = try {
     val cookies = state.settings.cookieSource().takeIf { it.type() == CookieSource.Type.FILE }?.file()
-    val lyrics = YoutubeLyricsRepository.load(cookies, track.videoId, track.sourceUrl)
+    val lyrics = YoutubeLyricsRepository.load(cookies, track.videoId, track.sourceUrl, track.title, track.artist,
+        track.durationMs)
     val source = when (lyrics.source) {
+        YoutubeLyricsRepository.Source.LRCLIB -> if (lyrics.isSynced) "LRCLIB · синхронный текст" else "LRCLIB"
         YoutubeLyricsRepository.Source.YOUTUBE_MUSIC -> lyrics.detail ?: "YouTube Music"
         YoutubeLyricsRepository.Source.MANUAL_SUBTITLES -> "Субтитры видео (${lyrics.detail})"
         YoutubeLyricsRepository.Source.AUTOMATIC_SUBTITLES -> "Автоматические субтитры (${lyrics.detail})"
         null -> ""
     }
-    LyricsResult.Found(lyrics.text, source)
+    LyricsResult.Found(lyrics.text, source, lyrics.lines)
 } catch (e: YoutubeLyricsRepository.MissingLyricsException) {
     LyricsResult.Missing(
         if (e.reason == YoutubeLyricsRepository.MissingReason.NO_YOUTUBE_SOURCE) "Трек не связан с YouTube — текст взять неоткуда"
-        else "Для этого трека текста нет ни в YouTube Music, ни в субтитрах"
+        else "Для этого трека текста нет ни в LRCLIB, ни в YouTube Music, ни в субтитрах"
     )
 } catch (e: Throwable) {
     // lyrics are optional: no failure here (network, YouTube changes, linkage errors) may close the app

@@ -45,15 +45,27 @@ public final class YoutubeLyricsRepository {
         public final String text;
         public final Source source;
         public final String detail;
+        /** Lines with the moment they are sung; empty when the source has no timing. */
+        public final List<TimedLine> lines;
 
         Lyrics(String text, Source source, String detail) {
+            this(text, source, detail, List.of());
+        }
+
+        Lyrics(String text, Source source, String detail, List<TimedLine> lines) {
             this.text = text;
             this.source = source;
             this.detail = detail;
+            this.lines = List.copyOf(lines);
+        }
+
+        public boolean isSynced() {
+            return !lines.isEmpty();
         }
     }
 
     public enum Source {
+        LRCLIB,
         YOUTUBE_MUSIC,
         MANUAL_SUBTITLES,
         AUTOMATIC_SUBTITLES
@@ -98,20 +110,70 @@ public final class YoutubeLyricsRepository {
     public static Lyrics load(@Nullable Path cookiesFile,
                               @Nullable String metadataVideoId,
                               @Nullable String metadataSourceUrl) throws Exception {
+        return load(cookiesFile, metadataVideoId, metadataSourceUrl, null, null, 0);
+    }
+
+    /**
+     * Synced lyrics from LRCLIB first (by artist, title and length), then YouTube Music, then
+     * the video's subtitles (timed), then LRCLIB's plain text.
+     *
+     * @param title    track title, for LRCLIB; null skips it
+     * @param uploader channel or artist
+     */
+    public static Lyrics load(@Nullable Path cookiesFile,
+                              @Nullable String metadataVideoId,
+                              @Nullable String metadataSourceUrl,
+                              @Nullable String title,
+                              @Nullable String uploader,
+                              long durationMs) throws Exception {
         String videoId = clean(metadataVideoId);
         String sourceUrl = clean(metadataSourceUrl);
 
         if (videoId == null && sourceUrl != null) {
             videoId = YoutubeUrlParser.videoId(sourceUrl);
         }
-        if (videoId == null) {
-            throw new MissingLyricsException(MissingReason.NO_YOUTUBE_SOURCE);
-        }
-
-        Lyrics cached = memoryCache.get(videoId);
+        String cacheKey = videoId != null ? videoId : "lrclib:" + uploader + "/" + title;
+        Lyrics cached = memoryCache.get(cacheKey);
         if (cached != null) {
             return cached;
         }
+
+        LrclibLyrics.Result lrclib = null;
+        if (title != null && !title.isBlank()) {
+            try {
+                lrclib = LrclibLyrics.find(uploader, title, durationMs);
+            } catch (Exception ignored) {
+                // LRCLIB is one source of several
+            }
+        }
+        if (lrclib != null && !lrclib.synced().isEmpty()) {
+            Lyrics result = new Lyrics(lrclib.plain(), Source.LRCLIB, "LRCLIB", lrclib.synced());
+            memoryCache.put(cacheKey, result);
+            return result;
+        }
+        if (videoId == null) {
+            if (lrclib != null) {
+                Lyrics result = new Lyrics(lrclib.plain(), Source.LRCLIB, "LRCLIB");
+                memoryCache.put(cacheKey, result);
+                return result;
+            }
+            throw new MissingLyricsException(MissingReason.NO_YOUTUBE_SOURCE);
+        }
+        try {
+            Lyrics youtube = loadYoutube(videoId, cookiesFile);
+            memoryCache.put(cacheKey, youtube);
+            return youtube;
+        } catch (Exception error) {
+            if (lrclib != null) {
+                Lyrics result = new Lyrics(lrclib.plain(), Source.LRCLIB, "LRCLIB");
+                memoryCache.put(cacheKey, result);
+                return result;
+            }
+            throw error;
+        }
+    }
+
+    private static Lyrics loadYoutube(String videoId, @Nullable Path cookiesFile) throws Exception {
 
         String watchUrl = "https://www.youtube.com/watch?v=" + videoId
                 + "&hl=" + Locale.getDefault().getLanguage()
@@ -121,10 +183,7 @@ public final class YoutubeLyricsRepository {
         try {
             MusicLyrics musicLyrics = loadYoutubeMusicLyrics(videoId, cookies);
             if (musicLyrics != null && !musicLyrics.text.isEmpty()) {
-                Lyrics result = new Lyrics(musicLyrics.text, Source.YOUTUBE_MUSIC,
-                        musicLyrics.attribution);
-                memoryCache.put(videoId, result);
-                return result;
+                return new Lyrics(musicLyrics.text, Source.YOUTUBE_MUSIC, musicLyrics.attribution);
             }
         } catch (Exception error) {
             // Ordinary video subtitles remain a useful fallback if YouTube Music
@@ -150,11 +209,9 @@ public final class YoutubeLyricsRepository {
         if (text.isEmpty()) {
             throw new MissingLyricsException(MissingReason.NOT_FOUND);
         }
-        Lyrics result = new Lyrics(text,
+        return new Lyrics(text,
                 caption.automatic ? Source.AUTOMATIC_SUBTITLES : Source.MANUAL_SUBTITLES,
-                caption.language);
-        memoryCache.put(videoId, result);
-        return result;
+                caption.language, parseJson3Timed(payload));
     }
 
     @Nullable
@@ -558,6 +615,40 @@ public final class YoutubeLyricsRepository {
             appendLines(lines, cue.toString());
         }
         return String.join("\n", lines).trim();
+    }
+
+    /** Subtitle lines with their start time (json3 "tStartMs"); a repeated line keeps its first time. */
+    static List<TimedLine> parseJson3Timed(String payload) {
+        if (!payload.stripLeading().startsWith("{")) {
+            return List.of();
+        }
+        JSONArray events = new JSONObject(payload).optJSONArray("events");
+        if (events == null) {
+            return List.of();
+        }
+        List<TimedLine> timed = new ArrayList<>();
+        List<String> lines = new ArrayList<>();
+        for (int i = 0; i < events.length(); i++) {
+            JSONObject event = events.optJSONObject(i);
+            JSONArray segments = event != null ? event.optJSONArray("segs") : null;
+            if (segments == null) {
+                continue;
+            }
+            StringBuilder cue = new StringBuilder();
+            for (int j = 0; j < segments.length(); j++) {
+                JSONObject segment = segments.optJSONObject(j);
+                if (segment != null) {
+                    cue.append(segment.optString("utf8", ""));
+                }
+            }
+            int before = lines.size();
+            appendLines(lines, cue.toString());
+            long start = event.optLong("tStartMs", 0);
+            for (int k = before; k < lines.size(); k++) {
+                timed.add(new TimedLine(start, lines.get(k)));
+            }
+        }
+        return timed;
     }
 
     static String absoluteYoutubeUrl(String url) {

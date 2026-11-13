@@ -107,6 +107,32 @@ fun SettingsScreen(state: AppState) {
                 }
             }
 
+            Section("Воспроизведение") {
+                val sound = state.sound
+                SettingRow(
+                    "Выравнивать громкость",
+                    "Тихие и громкие треки звучат одинаково (−14 LUFS, как в Spotify). Громкость каждого " +
+                        "трека измеряется один раз, в фоне",
+                ) {
+                    Segmented(listOf("on" to "Вкл", "off" to "Выкл"), if (sound.normalize) "on" else "off") {
+                        sound.changeNormalize(it == "on")
+                    }
+                }
+                sound.progress?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = VibyColors.AccentBright)
+                }
+                SettingRow(
+                    "Переход между треками",
+                    "Скачанные треки идут друг за другом без паузы. Плавный переход накладывает конец " +
+                        "трека на начало следующего",
+                ) {
+                    Segmented(
+                        listOf("0" to "Без паузы", "1" to "1 с", "3" to "3 с"),
+                        sound.crossfadeSeconds.toString(),
+                    ) { sound.changeCrossfade(it.toInt()) }
+                }
+            }
+
             Section("Загрузка") {
                 SettingRow("Формат аудио", "MP3 совместим везде, M4A сохраняет исходное качество без перекодирования") {
                     Segmented(listOf(Settings.FORMAT_MP3 to "MP3", Settings.FORMAT_M4A to "M4A"), format) {

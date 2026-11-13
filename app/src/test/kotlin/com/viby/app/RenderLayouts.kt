@@ -136,6 +136,16 @@ fun main(args: Array<String>): Unit = runBlocking {
         state.storage.changeMusicFolder(elsewhere.toPath())
     }
     withContext(Dispatchers.Main) { state.answer(null) }
+    // stage 5: synced lyrics from LRCLIB (network), the current line in the middle
+    shot("lyrics-synced", 1360, 860, interact = { scene ->
+        delay(8000)
+        // frames for the scroll animation to the sung line
+        repeat(20) { scene.render(it * 50_000_000L); delay(30) }
+    }) {
+        state.player.seekToMs(70_000)
+        state.sidePanel = SidePanel.LYRICS
+        state.navigate(Screen.Home)
+    }
     withContext(Dispatchers.Main) { state.engine.library().deletePlaylist(longName); state.close() }
     kotlin.system.exitProcess(0)
 }

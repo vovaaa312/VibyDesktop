@@ -15,6 +15,8 @@ import kotlinx.coroutines.launch
 class SleepTimer(
     private val scope: CoroutineScope,
     private val now: () -> Long = System::currentTimeMillis,
+    /** "До конца трека" was switched on or off: the engine must (not) continue by itself. */
+    var onTrackEndChanged: () -> Unit = {},
     private val onElapsed: () -> Unit,
 ) {
     /** Time left while a minutes timer runs, null otherwise. */
@@ -49,13 +51,16 @@ class SleepTimer(
     fun stopAfterTrack() {
         cancel()
         untilTrackEnds = true
+        onTrackEndChanged()
     }
 
     fun cancel() {
+        val wasTrackEnd = untilTrackEnds
         job?.cancel()
         job = null
         remainingMs = null
         untilTrackEnds = false
+        if (wasTrackEnd) onTrackEndChanged()
     }
 
     /** The current track ended: true when playback must stop here instead of going on. */
