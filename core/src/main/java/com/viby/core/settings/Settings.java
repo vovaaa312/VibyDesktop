@@ -82,6 +82,16 @@ public final class Settings {
         save();
     }
 
+    /** The window close button hides Viby to the tray instead of quitting (music keeps playing). */
+    public synchronized boolean closeToTray() {
+        return values.optBoolean("closeToTray", false);
+    }
+
+    public synchronized void setCloseToTray(boolean enabled) {
+        values.put("closeToTray", enabled);
+        save();
+    }
+
     /** Longest crossfade offered: a longer overlap starts too noticeably early. */
     public static final int MAX_CROSSFADE_SECONDS = 3;
 

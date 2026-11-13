@@ -72,6 +72,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.toComposeImageBitmap
+import androidx.compose.ui.graphics.toAwtImage
 import org.jetbrains.skia.Image
 import java.awt.Dimension
 import kotlin.system.exitProcess
@@ -133,21 +134,44 @@ fun main() = application {
     }
     var mediaControls by remember { mutableStateOf<WindowsMediaControls?>(null) }
     var visible by remember { mutableStateOf(true) }
+    /** Bumped by the tray to bring the window to the front. */
+    var showRequests by remember { mutableStateOf(0) }
+    var trayHintShown by remember { mutableStateOf(false) }
+    val quit = {
+        // hide at once; cleanup (hook, downloads, audio, database) must not keep the window frozen
+        visible = false
+        val cleanup = Thread({
+            runCatching { MediaKeys.unregister() }
+            runCatching { mediaControls?.close() }
+            state.close()
+        }, "viby-shutdown").apply { isDaemon = true; start() }
+        cleanup.join(3_000)
+        // an interrupted download simply resumes on the next start
+        exitProcess(0)
+    }
+    val show: () -> Unit = {
+        visible = true
+        showRequests += 1
+    }
+    val notify = VibyTray(state, onShow = show, onQuit = quit)
     Window(
         onCloseRequest = {
-            // hide at once; cleanup (hook, downloads, audio, database) must not keep the window frozen
-            visible = false
-            val cleanup = Thread({
-                runCatching { MediaKeys.unregister() }
-                runCatching { mediaControls?.close() }
-                state.close()
-            }, "viby-shutdown").apply { isDaemon = true; start() }
-            cleanup.join(3_000)
-            // an interrupted download simply resumes on the next start
-            exitProcess(0)
+            if (state.closeToTray && notify != null) {
+                visible = false
+                if (!trayHintShown) {
+                    trayHintShown = true
+                    notify(
+                        "Viby работает в трее",
+                        "Музыка продолжает играть. Открыть — двойной клик по иконке, выйти — «Выход» в её меню.",
+                    )
+                }
+            } else {
+                quit()
+            }
         },
         visible = visible,
-        title = "Viby",
+        // the taskbar thumbnail is captioned with the window title, as in AIMP
+        title = state.player.current?.title ?: "Viby",
         icon = appIcon,
         state = rememberWindowState(size = DpSize(1360.dp, 860.dp)),
         onKeyEvent = { event ->
@@ -165,9 +189,36 @@ fun main() = application {
         },
     ) {
         LaunchedEffect(Unit) { window.minimumSize = Dimension(1000, 640) }
+        // the tray asked for the window: out of the tray, restored and in front
+        LaunchedEffect(showRequests) {
+            if (showRequests > 0) {
+                window.isMinimized = false
+                window.toFront()
+                window.requestFocus()
+            }
+        }
         // the app background (VibyColors.Background) behind white caption text
         LaunchedEffect(Unit) { WindowsTitleBar.apply(window, caption = 0x000000, text = 0xFFFFFF) }
         LaunchedEffect(Unit) { state.player.runClock() }
+        // Windows taskbar: the cover and previous / play-pause / next under the thumbnail of the button
+        LaunchedEffect(Unit) {
+            val taskbar = WindowsTaskbar.create(window, state.dirs.logs().resolve("media-keys.log").toFile(), onMediaAction)
+                ?: return@LaunchedEffect
+            try {
+                var coverUrl: String? = null
+                var cover: java.awt.image.BufferedImage? = null
+                snapshotFlow { state.player.current to state.player.isPlaying }.collect { (track, playing) ->
+                    val url = track?.thumbnailUrl
+                    if (url != coverUrl) {
+                        coverUrl = url
+                        cover = url?.let { com.viby.app.ui.CoverCache.load(it) }?.toAwtImage()
+                    }
+                    taskbar.update(playing, track != null, cover)
+                }
+            } finally {
+                taskbar.close()
+            }
+        }
         LaunchedEffect(Unit) {
             val log = state.dirs.logs().resolve("media-keys.log").toFile()
             // Windows: a real media session (flyout, keys go only to the session picked there);

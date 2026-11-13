@@ -94,6 +94,15 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
 
     var libraryTab by mutableStateOf(LibraryTab.TRACKS)
 
+    /** Settings → Окно: the close button hides Viby to the tray. */
+    var closeToTray by mutableStateOf(settings.closeToTray())
+        private set
+
+    fun changeCloseToTray(enabled: Boolean) {
+        closeToTray = enabled
+        settings.setCloseToTray(enabled)
+    }
+
     val sound by lazy { SoundState(this) }
 
     val sleepTimer = SleepTimer(scope, onTrackEndChanged = { sound.updateNext() }) {

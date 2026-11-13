@@ -133,6 +133,18 @@ fun SettingsScreen(state: AppState) {
                 }
             }
 
+            Section("Окно") {
+                SettingRow(
+                    "Закрывать в трей",
+                    "Крестик прячет Viby в область уведомлений, музыка продолжает играть. Открыть — двойной " +
+                        "клик по иконке, выйти — «Выход» в её меню",
+                ) {
+                    Segmented(listOf("on" to "Вкл", "off" to "Выкл"), if (state.closeToTray) "on" else "off") {
+                        state.changeCloseToTray(it == "on")
+                    }
+                }
+            }
+
             Section("Загрузка") {
                 SettingRow("Формат аудио", "MP3 совместим везде, M4A сохраняет исходное качество без перекодирования") {
                     Segmented(listOf(Settings.FORMAT_MP3 to "MP3", Settings.FORMAT_M4A to "M4A"), format) {

@@ -30,10 +30,12 @@ fun main(args: Array<String>): Unit = runBlocking {
 
     suspend fun shot(
         name: String, width: Int, height: Int,
-        interact: suspend (ImageComposeScene) -> Unit = {}, setup: () -> Unit,
+        interact: suspend (ImageComposeScene) -> Unit = {},
+        content: @androidx.compose.runtime.Composable () -> Unit = { App(state) },
+        setup: () -> Unit,
     ) = withContext(Dispatchers.Main) {
         setup()
-        val scene = ImageComposeScene(width, height, Density(1f)) { VibyTheme { App(state) } }
+        val scene = ImageComposeScene(width, height, Density(1f)) { VibyTheme { content() } }
         scene.render(0)
         delay(800)
         interact(scene)
@@ -146,6 +148,13 @@ fun main(args: Array<String>): Unit = runBlocking {
         state.sidePanel = SidePanel.LYRICS
         state.navigate(Screen.Home)
     }
+    shot("settings-window", 1360, 1300) { state.navigate(Screen.Settings) }
+    for (theme in com.viby.app.theme.AccentTheme.entries) {
+        shot("tray-${theme.name.lowercase()}", 300, 236, content = { TrayMenuContent(state, {}, {}) }) {
+            com.viby.app.theme.VibyColors.theme = theme
+        }
+    }
+    withContext(Dispatchers.Main) { com.viby.app.theme.VibyColors.theme = com.viby.app.theme.AccentTheme.VIBY }
     withContext(Dispatchers.Main) { state.engine.library().deletePlaylist(longName); state.close() }
     kotlin.system.exitProcess(0)
 }
