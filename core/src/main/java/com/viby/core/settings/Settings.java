@@ -82,6 +82,39 @@ public final class Settings {
         save();
     }
 
+    public static final String AUTO_CHECK_OFF = "off";
+    public static final String AUTO_CHECK_START = "start";
+    public static final String AUTO_CHECK_ALWAYS = "always";
+
+    /**
+     * Automatic check for new tracks in YouTube playlists: off, at start, or always (at start,
+     * every few minutes and when the window comes back to the front).
+     */
+    public synchronized String autoCheckMode() {
+        String mode = values.optString("autoCheckMode", AUTO_CHECK_ALWAYS);
+        return mode.equals(AUTO_CHECK_OFF) || mode.equals(AUTO_CHECK_START) ? mode : AUTO_CHECK_ALWAYS;
+    }
+
+    public synchronized void setAutoCheckMode(String mode) {
+        values.put("autoCheckMode", mode);
+        save();
+    }
+
+    /** Playlists left out of the automatic check. */
+    public synchronized java.util.Set<String> autoCheckExcluded() {
+        java.util.Set<String> names = new java.util.LinkedHashSet<>();
+        org.json.JSONArray array = values.optJSONArray("autoCheckExcluded");
+        for (int i = 0; array != null && i < array.length(); i++) {
+            names.add(array.optString(i));
+        }
+        return names;
+    }
+
+    public synchronized void setAutoCheckExcluded(java.util.Collection<String> names) {
+        values.put("autoCheckExcluded", new org.json.JSONArray(names));
+        save();
+    }
+
     /** The window close button hides Viby to the tray instead of quitting (music keeps playing). */
     public synchronized boolean closeToTray() {
         return values.optBoolean("closeToTray", false);

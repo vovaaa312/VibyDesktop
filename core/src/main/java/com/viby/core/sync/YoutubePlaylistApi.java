@@ -56,6 +56,45 @@ public final class YoutubePlaylistApi {
             this.statusCode = statusCode;
             this.reason = reason;
         }
+
+        /** The daily quota of the Google project is used up (until midnight Pacific time). */
+        public boolean isQuotaExceeded() {
+            return statusCode == 403 && ("quotaExceeded".equals(reason) || "dailyLimitExceeded".equals(reason)
+                    || "rateLimitExceeded".equals(reason));
+        }
+    }
+
+    /** Whether the error or one of its causes is a used-up API quota. */
+    public static boolean isQuotaExceeded(@Nullable Throwable error) {
+        for (Throwable e = error; e != null; e = e.getCause()) {
+            if (e instanceof ApiException api && api.isQuotaExceeded()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Number of items in each playlist (private and deleted videos included): one quota unit per
+     * 50 playlists, so the automatic check can see cheaply which playlists changed.
+     */
+    public java.util.Map<String, Integer> itemCounts(String accessToken, List<String> playlistIds)
+            throws IOException, JSONException {
+        java.util.Map<String, Integer> result = new java.util.HashMap<>();
+        for (int from = 0; from < playlistIds.size(); from += 50) {
+            String ids = String.join(",", playlistIds.subList(from, Math.min(from + 50, playlistIds.size())));
+            JSONObject root = request("GET", API + "playlists?part=contentDetails&maxResults=50&id=" + encode(ids),
+                    accessToken, null);
+            JSONArray items = root.optJSONArray("items");
+            for (int i = 0; items != null && i < items.length(); i++) {
+                JSONObject item = items.getJSONObject(i);
+                JSONObject details = item.optJSONObject("contentDetails");
+                if (details != null && details.has("itemCount")) {
+                    result.put(item.optString("id"), details.optInt("itemCount"));
+                }
+            }
+        }
+        return result;
     }
 
     @Nullable

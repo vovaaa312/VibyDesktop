@@ -307,6 +307,31 @@ class DownloadServiceTest {
     }
 
     @Test
+    void onlyTheNewVideosAreDownloadedAtTheirYoutubePlaces() throws Exception {
+        List<DownloadService.VideoEntry> all = List.of(
+                new DownloadService.VideoEntry("n1", "New first", null, 0),
+                new DownloadService.VideoEntry("o1", "Old", null, 0),
+                new DownloadService.VideoEntry("n2", "New last", null, 0),
+                new DownloadService.VideoEntry("gone", "Deleted by the user", null, 0));
+        Track old = new Track();
+        old.playlistName = "Watched";
+        old.videoId = "o1";
+        old.title = "Old";
+        old.filePath = "";
+        library.ensurePlaylist("Watched");
+        library.insert(old);
+
+        service.enqueueVideos("https://www.youtube.com/playlist?list=PLwatched", "Watched", "Watched", all,
+                List.of("n1", "n2"));
+        await(() -> finished(1));
+        List<Track> tracks = library.tracks("Watched");
+        // "gone" is not brought back; the new ones take their YouTube places around the old one
+        assertEquals(List.of("n1", "o1", "n2"), tracks.stream().map(t -> t.videoId).toList());
+        assertEquals(List.of(0, 1, 2), tracks.stream().map(t -> t.youtubePosition).toList());
+        assertEquals(2, service.getJobs().get(0).totalCount);
+    }
+
+    @Test
     void parsesTotalSizeFromYtDlpProgress() {
         DownloadJob job = new DownloadJob("url", null, false);
         job.progress = 50;

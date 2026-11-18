@@ -154,6 +154,8 @@ fun main() = application {
         showRequests += 1
     }
     val notify = VibyTray(state, onShow = show, onQuit = quit)
+    // news from the background (new tracks) while the window is hidden in the tray
+    state.autoCheck.notifyHidden = notify?.let { send -> { title, text -> if (!visible) send(title, text) } }
     Window(
         onCloseRequest = {
             if (state.closeToTray && notify != null) {
@@ -189,6 +191,12 @@ fun main() = application {
         },
     ) {
         LaunchedEffect(Unit) { window.minimumSize = Dimension(1000, 640) }
+        // back to Viby after adding a track on YouTube: look for it now
+        LaunchedEffect(Unit) {
+            window.addWindowFocusListener(object : java.awt.event.WindowAdapter() {
+                override fun windowGainedFocus(e: java.awt.event.WindowEvent) = state.autoCheck.onWindowActivated()
+            })
+        }
         // the tray asked for the window: out of the tray, restored and in front
         LaunchedEffect(showRequests) {
             if (showRequests > 0) {

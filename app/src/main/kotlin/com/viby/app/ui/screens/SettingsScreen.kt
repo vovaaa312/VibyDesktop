@@ -30,6 +30,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.material3.TextButton
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -130,6 +131,35 @@ fun SettingsScreen(state: AppState) {
                         listOf("0" to "Без паузы", "1" to "1 с", "3" to "3 с"),
                         sound.crossfadeSeconds.toString(),
                     ) { sound.changeCrossfade(it.toInt()) }
+                }
+            }
+
+            Section("Новые треки") {
+                val auto = state.autoCheck
+                SettingRow(
+                    "Проверять плейлисты YouTube",
+                    "Новые видео сами попадают в загрузки, удалённые треки не возвращаются. «Постоянно» — " +
+                        "ещё и каждые 10 минут и при возврате в окно Viby",
+                ) {
+                    Segmented(
+                        listOf(
+                            Settings.AUTO_CHECK_OFF to "Выкл",
+                            Settings.AUTO_CHECK_START to "При запуске",
+                            Settings.AUTO_CHECK_ALWAYS to "Постоянно",
+                        ),
+                        auto.mode,
+                    ) { auto.changeMode(it) }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        (auto.status ?: "Проверок ещё не было") + " · отключить для плейлиста — правый клик по нему",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = VibyColors.TextSecondary,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(enabled = !auto.running, onClick = { auto.check() }) {
+                        Text(if (auto.running) "Проверяю…" else "Проверить сейчас")
+                    }
                 }
             }
 

@@ -149,6 +149,7 @@ fun main(args: Array<String>): Unit = runBlocking {
         state.navigate(Screen.Home)
     }
     shot("settings-window", 1360, 1300) { state.navigate(Screen.Settings) }
+    shot("settings-account", 1360, 2200) { state.navigate(Screen.Settings) }
     for (theme in com.viby.app.theme.AccentTheme.entries) {
         shot("tray-${theme.name.lowercase()}", 300, 236, content = { TrayMenuContent(state, {}, {}) }) {
             com.viby.app.theme.VibyColors.theme = theme

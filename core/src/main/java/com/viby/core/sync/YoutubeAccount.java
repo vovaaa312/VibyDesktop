@@ -140,6 +140,28 @@ public final class YoutubeAccount {
     }
 
     /**
+     * Lists a playlist through the API for the automatic check: private playlists work without
+     * browser cookies. Throws when not signed in.
+     */
+    public com.viby.core.download.PlaylistWatcher.Remote listVideos(String playlistId) throws Exception {
+        // durations are looked up later, only for the new videos (quota)
+        List<DownloadService.VideoEntry> entries = new ArrayList<>();
+        for (YoutubePlaylistApi.PlaylistVideo video : api.playlistVideos(oauth.accessToken(), playlistId)) {
+            entries.add(new DownloadService.VideoEntry(video.videoId(), video.title(), video.channel(), 0L));
+        }
+        return new com.viby.core.download.PlaylistWatcher.Remote(playlistId, entries);
+    }
+
+    /** Item counts of playlists: one quota unit per 50 playlists. */
+    public Map<String, Integer> playlistCounts(List<String> playlistIds) throws Exception {
+        return api.itemCounts(oauth.accessToken(), playlistIds);
+    }
+
+    public Map<String, Long> durations(List<String> videoIds) throws Exception {
+        return videoIds.isEmpty() ? Map.of() : api.durations(oauth.accessToken(), videoIds);
+    }
+
+    /**
      * "Обновить из YouTube" for a playlist linked to the account: lists it through the API,
      * so private playlists (saved radios) work without browser cookies. Tracks already in the
      * library are skipped by the download job. Returns false when the playlist is not linked.

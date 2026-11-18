@@ -147,12 +147,25 @@ public final class DownloadService {
      * private playlist that yt-dlp cannot open without browser cookies.
      */
     public void enqueueVideos(String sourceUrl, String playlist, String title, List<VideoEntry> videos) {
+        enqueueVideos(sourceUrl, playlist, title, videos, null);
+    }
+
+    /**
+     * Like {@link #enqueueVideos(String, String, String, List)}, but downloads only the videos in
+     * {@code only} (new tracks found by the automatic check). The whole list still sets the
+     * YouTube order, so the new tracks take their places among the existing ones.
+     */
+    public void enqueueVideos(String sourceUrl, String playlist, String title, List<VideoEntry> videos,
+                              java.util.@Nullable Collection<String> only) {
         JSONArray entries = new JSONArray();
         for (VideoEntry video : videos) {
             entries.put(new JSONObject().put("id", video.videoId()).put("title", video.title())
                     .put("uploader", video.uploader()).put("duration", video.durationMs() / 1000.0));
         }
         JSONObject root = new JSONObject().put("title", title).put("entries", entries);
+        if (only != null) {
+            root.put("only", new JSONArray(only));
+        }
         enqueue(sourceUrl, playlist, true, 0L, -1L, false, null, root.toString());
     }
 
@@ -499,6 +512,23 @@ public final class DownloadService {
                 youtubePositions.put(videoId, i);
             }
         }
+        JSONArray only = root.optJSONArray("only");
+        if (only != null) {
+            // automatic check: only the new videos are downloaded, at their YouTube positions
+            java.util.Set<String> wanted = new java.util.HashSet<>();
+            for (int i = 0; i < only.length(); i++) {
+                wanted.add(only.optString(i, ""));
+            }
+            JSONArray selected = new JSONArray();
+            for (int i = 0; i < entries.length(); i++) {
+                JSONObject entry = entries.getJSONObject(i);
+                if (wanted.contains(entry.optString("id", ""))) {
+                    selected.put(new JSONObject(entry.toString()).put("position", i));
+                }
+            }
+            entries = selected;
+            job.totalCount = entries.length();
+        }
         prepareTrackQueue(job, entries);
         ensurePlaceholderTracks(job, playlist);
         applyYoutubeOrder(playlist, youtubePositions);
@@ -592,7 +622,7 @@ public final class DownloadService {
                         entry.optString("channel", null));
                 long durationMs = (long) (entry.optDouble("duration", 0) * 1000);
                 byId.put(videoId, new DownloadJob.TrackItem(
-                        videoId, title, uploader, durationMs, i));
+                        videoId, title, uploader, durationMs, entry.optInt("position", i)));
             }
             if (job.trackOrderJson != null && !job.trackOrderJson.isEmpty()) {
                 JSONArray restoredOrder = new JSONArray(job.trackOrderJson);

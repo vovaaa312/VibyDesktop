@@ -86,6 +86,7 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
     val player = PlayerState(EngineAudio(engine.audio()))
     val downloads = DownloadsState(this)
     val account = AccountState(this)
+    val autoCheck = AutoCheckState(this)
     val updates = UpdateState(this)
     val storage = StorageState(this)
     val favorites = FavoritesState(settings)
@@ -278,7 +279,10 @@ class AppState(val engine: VibyEngine = VibyEngine(AppDirs.current())) {
         return true
     }
 
-    fun start() = engine.start()
+    fun start() {
+        engine.start()
+        autoCheck.start()
+    }
 
     fun close() = runCatching {
         savePlaybackNow()

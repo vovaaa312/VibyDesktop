@@ -147,6 +147,13 @@ private fun SidebarContent(state: AppState) {
                                 } else if (state.account.isSignedIn && !playlist.canSync) {
                                     add(MenuAction("Сохранить на YouTube") { state.account.saveToYoutube(playlist.name) })
                                 }
+                                if (playlist.canSync) {
+                                    val auto = state.autoCheck
+                                    val off = auto.isExcluded(playlist.name)
+                                    add(MenuAction(if (off) "Проверять новые треки" else "Не проверять новые треки") {
+                                        auto.setExcluded(playlist.name, !off)
+                                    })
+                                }
                                 add(MenuAction("Удалить", danger = true) { dialog = PlaylistDialog.Delete(playlist) })
                             }
                         }) {

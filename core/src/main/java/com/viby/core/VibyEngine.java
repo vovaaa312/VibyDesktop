@@ -78,6 +78,7 @@ public final class VibyEngine implements AutoCloseable {
     private final AudioEngine audio;
     private final EqualizerController equalizer;
     private final YoutubeAccount account;
+    private final com.viby.core.download.PlaylistWatcher watcher;
     private final List<Listener> listeners = new CopyOnWriteArrayList<>();
     private volatile Status status = new Status(State.INITIALIZING, null, 0, 0, null);
 
@@ -108,6 +109,35 @@ public final class VibyEngine implements AutoCloseable {
         this.equalizer = new EqualizerController(audio.equalizer(), settings);
         this.account = new YoutubeAccount(new GoogleOAuth(GoogleOAuth.ClientConfig.bundled(),
                 dirs.root().resolve("google_account.json")), database, library, downloads);
+        // yt-dlp reads playlists without quota; the account only what yt-dlp cannot (private ones)
+        this.watcher = new com.viby.core.download.PlaylistWatcher(dirs.root().resolve("watched_playlists.json"),
+                library, com.viby.core.download.PlaylistWatcher.Queue.of(downloads),
+                new com.viby.core.download.PlaylistWatcher.Lister() {
+                    @Override
+                    public com.viby.core.download.PlaylistWatcher.Remote ytDlp(String id) throws Exception {
+                        return com.viby.core.download.PlaylistWatcher.listWithYtDlp(extractor, id);
+                    }
+
+                    @Override
+                    public boolean signedIn() {
+                        return account.isConfigured() && account.isSignedIn();
+                    }
+
+                    @Override
+                    public com.viby.core.download.PlaylistWatcher.Remote api(String id) throws Exception {
+                        return account.listVideos(id);
+                    }
+
+                    @Override
+                    public java.util.Map<String, Integer> counts(List<String> ids) throws Exception {
+                        return account.playlistCounts(ids);
+                    }
+
+                    @Override
+                    public java.util.Map<String, Long> durations(List<String> videoIds) throws Exception {
+                        return account.durations(videoIds);
+                    }
+                });
     }
 
     public void addListener(Listener listener) {
@@ -216,6 +246,10 @@ public final class VibyEngine implements AutoCloseable {
 
     public DuplicateTracks duplicates() {
         return duplicates;
+    }
+
+    public com.viby.core.download.PlaylistWatcher watcher() {
+        return watcher;
     }
 
     public YoutubeAccount account() {
